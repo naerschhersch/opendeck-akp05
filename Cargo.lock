@@ -319,9 +319,9 @@ dependencies = [
 
 [[package]]
 name = "mirajazz"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13aadd46e812fa7f150bb6bee6b31f75911651167409d38711976e966061d1ab"
+checksum = "c4fafa8e5e137919fcf7697f8d549a315a2cc0d487a3caa8109a645c3cd87df1"
 dependencies = [
  "hidapi",
  "image",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "opendeck-akp03"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "data-url",
  "image",

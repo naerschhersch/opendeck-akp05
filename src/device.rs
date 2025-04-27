@@ -4,10 +4,11 @@ use data_url::DataUrl;
 use image::load_from_memory_with_format;
 use mirajazz::{
     device::{Device, list_devices, new_hidapi},
-    state::DeviceStateUpdate,
+    error::MirajazzError,
+    state::{DeviceStateReader, DeviceStateUpdate},
 };
 use openaction::SetImageEvent;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::mappings::{
     AJAZZ_VID, CandidateDevice, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, Kind, MIRABOX_VID,
@@ -61,35 +62,16 @@ pub fn get_candidates() -> Vec<CandidateDevice> {
 pub fn device_task(candidate: CandidateDevice, disp_tx: Sender<DeviceMessage>) {
     let (device_tx, mut device_rx) = mpsc::channel::<DeviceMessage>(1);
 
-    let hidapi = match new_hidapi() {
-        Ok(hidapi) => hidapi,
-        Err(e) => {
-            log::error!("Failed to init hidapi: {e}");
-            exit(1);
+    let id = candidate.id.clone();
+
+    log::info!("Connecting to {} from a device task", id);
+
+    let device = match connect(&candidate) {
+        Ok(device) => device,
+        Err(err) => {
+            return log::error!("Error while connecting to device {err}");
         }
     };
-
-    log::info!("Connecting to {} from a device task", candidate.id);
-
-    let device = Device::connect(
-        &hidapi,
-        candidate.vid,
-        candidate.pid,
-        &candidate.serial,
-        true,
-        KEY_COUNT,
-        ENCODER_COUNT,
-    )
-    .expect("Failed to connect");
-
-    log::info!("Connected to {}", candidate.id);
-
-    log::info!("Resetting a device");
-
-    device.set_brightness(100).unwrap();
-    device.clear_all_button_images().unwrap();
-
-    device.flush().unwrap();
 
     disp_tx
         .blocking_send(DeviceMessage::Connected(
@@ -103,47 +85,23 @@ pub fn device_task(candidate: CandidateDevice, disp_tx: Sender<DeviceMessage>) {
     {
         let reader = device.get_reader();
 
-        log::debug!("Reading events from {}", candidate.id);
+        log::info!("Reader is ready for {}", id);
 
         loop {
-            if let Ok(message) = device_rx.try_recv() {
-                log::debug!("Device task got message: {:#?}", message);
+            if let Err(err) = tick(id.clone(), &device, &mut device_rx, &disp_tx, &reader) {
+                log::error!("Device {} error: {}", id, err);
 
-                match message {
-                    DeviceMessage::SetImage(_, evt) => {
-                        handle_set_image(&device, evt);
-                    }
-                    DeviceMessage::SetBrightness(_, brightness) => {
-                        device.set_brightness(brightness).unwrap();
-                    }
-                    _ => {}
+                // Some errors are not critical and can be ignored without sending disconnected event
+                if matches!(err, MirajazzError::ImageError(_) | MirajazzError::BadData) {
+                    continue;
                 }
+
+                disp_tx
+                    .blocking_send(DeviceMessage::Disconnected(id.clone()))
+                    .unwrap();
+
+                break;
             }
-
-            match reader.read(
-                None,
-                crate::inputs::process_input,
-                candidate.kind.supports_both_states(),
-            ) {
-                Ok(updates) => {
-                    for update in updates {
-                        log::debug!("New update: {:#?}", update);
-
-                        disp_tx
-                            .blocking_send(DeviceMessage::Update(candidate.id.clone(), update))
-                            .unwrap();
-                    }
-                }
-                Err(err) => {
-                    log::error!("Device error {}: {}", candidate.id, err);
-
-                    disp_tx
-                        .blocking_send(DeviceMessage::Disconnected(candidate.id.clone()))
-                        .unwrap();
-
-                    break;
-                }
-            };
 
             sleep(Duration::from_millis(POLL_RATE_MS));
         }
@@ -152,50 +110,113 @@ pub fn device_task(candidate: CandidateDevice, disp_tx: Sender<DeviceMessage>) {
     }
 }
 
+fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
+    let hidapi = match new_hidapi() {
+        Ok(hidapi) => hidapi,
+        Err(e) => {
+            log::error!("Failed to init hidapi: {e}");
+            exit(1);
+        }
+    };
+
+    let device = Device::connect(
+        &hidapi,
+        candidate.vid,
+        candidate.pid,
+        &candidate.serial,
+        true,
+        candidate.kind.supports_both_states(),
+        KEY_COUNT,
+        ENCODER_COUNT,
+    )?;
+
+    log::info!("Connected to {}", candidate.id);
+
+    log::info!("Resetting a device");
+
+    device.set_brightness(50)?;
+    device.clear_all_button_images()?;
+    device.flush()?;
+
+    Ok(device)
+}
+
+fn tick(
+    id: String,
+    device: &Device,
+    device_rx: &mut Receiver<DeviceMessage>,
+    disp_tx: &Sender<DeviceMessage>,
+    reader: &Arc<DeviceStateReader>,
+) -> Result<(), MirajazzError> {
+    if let Ok(message) = device_rx.try_recv() {
+        log::debug!("Device task got message: {:#?}", message);
+
+        match message {
+            DeviceMessage::SetImage(_, evt) => {
+                handle_set_image(&device, evt)?;
+            }
+            DeviceMessage::SetBrightness(_, brightness) => {
+                device.set_brightness(brightness)?;
+            }
+            _ => {}
+        }
+    }
+
+    let updates = reader.read(None, crate::inputs::process_input)?;
+
+    for update in updates {
+        log::debug!("New update: {:#?}", update);
+
+        disp_tx
+            .blocking_send(DeviceMessage::Update(id.clone(), update))
+            .unwrap();
+    }
+
+    Ok(())
+}
+
 /// Handles different combinations of "set image" event, including clearing the specific buttons and whole device
-fn handle_set_image(device: &Device, evt: SetImageEvent) {
+fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
     match (evt.position, evt.image) {
         (Some(position), Some(image)) => {
             // Device has 6 buttons with screens and 3 buttons without screens, so ignore anything above 5
             if position > 5 {
-                return;
+                return Ok(());
             }
 
             log::info!("Setting image for button {}", position);
 
-            // OpenDeck sends image as a data urls, so parse them
-            let url = DataUrl::process(image.as_str()).unwrap();
-            let (body, _fragment) = url.decode_to_vec().unwrap();
+            // OpenDeck sends image as a data url, so parse it using a library
+            let url = DataUrl::process(image.as_str()).unwrap(); // Isn't expected to fail, so unwrap it is
+            let (body, _fragment) = url.decode_to_vec().unwrap(); // Same here
 
             // Allow only image/jpeg mime for now
             if url.mime_type().subtype != "jpeg" {
-                log::error!("Incorrect image type: {}", url.mime_type().subtype);
+                log::error!("Incorrect mime type: {}", url.mime_type());
 
-                return;
+                return Ok(()); // Not a fatal error, enough to just log it
             }
 
-            let image =
-                load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg).unwrap();
+            let image = load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg)?;
 
-            device
-                .set_button_image(position, IMAGE_FORMAT, image)
-                .unwrap();
-
-            device.flush().unwrap();
+            device.set_button_image(position, IMAGE_FORMAT, image)?;
+            device.flush()?;
         }
         (Some(position), None) => {
             // Device has 6 buttons with screens and 3 buttons without screens, so only clear below 6
-            if position < 6 {
-                device.clear_button_image(position).unwrap();
-
-                device.flush().unwrap();
+            if position > 5 {
+                return Ok(());
             }
+
+            device.clear_button_image(position)?;
+            device.flush()?;
         }
         (None, None) => {
-            device.clear_all_button_images().unwrap();
-
-            device.flush().unwrap();
+            device.clear_all_button_images()?;
+            device.flush()?;
         }
         _ => {}
     }
+
+    Ok(())
 }

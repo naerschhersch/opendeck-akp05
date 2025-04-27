@@ -6,7 +6,7 @@
   "PluginUUID": "st.lynx.plugins.opendeck-akp03",
   "CodePathLin": "opendeck-akp03",
   "Icon": "assets/icon",
-  "Category": "Media",
+  "Category": "Hardware",
   "OS": [{ "Platform": "linux" }],
   "Actions": [],
   "DeviceNamespace": "n3"

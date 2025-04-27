@@ -8,7 +8,6 @@ data-url = "0.3.1"
 image = { version = "0.25.6", default-features = false, features = ["bmp", "jpeg"] }
 log = "0.4.27"
 mirajazz = "0.2.1"
-once_cell = "1.21.3"
 openaction = "1.1.3"
 simplelog = "0.12.2"
 tokio = { version = "1.44.2", features = ["full"] }

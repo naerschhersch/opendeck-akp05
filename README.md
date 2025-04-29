@@ -43,3 +43,7 @@ An unofficial plugin for Mirabox N3-family devices
 </details>
 
 - Device retains images after OpenDeck is closed
+
+## Acknowledgments
+
+This plugin is heavily based on work by contributors of [elgato-streamdeck](https://github.com/streamduck-org/elgato-streamdeck) crate

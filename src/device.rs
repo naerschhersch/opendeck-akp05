@@ -11,7 +11,8 @@ use openaction::SetImageEvent;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::mappings::{
-    AJAZZ_VID, CandidateDevice, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, Kind, MIRABOX_VID,
+    AJAZZ_VID, CandidateDevice, DEVICE_NAMESPACE, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, Kind,
+    MIRABOX_VID,
 };
 
 const POLL_RATE_MS: u64 = 50;
@@ -40,7 +41,7 @@ pub fn get_candidates() -> Vec<CandidateDevice> {
     let mut candidates: Vec<CandidateDevice> = Vec::new();
 
     for (vid, pid, serial) in list_devices(&hidapi, &[AJAZZ_VID, MIRABOX_VID]) {
-        let id = format!("n3-{}", serial);
+        let id = format!("{}-{}", DEVICE_NAMESPACE, serial);
 
         if let Some(kind) = Kind::from_vid_pid(vid, pid) {
             candidates.push(CandidateDevice {

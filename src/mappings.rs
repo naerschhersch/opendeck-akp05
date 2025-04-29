@@ -1,5 +1,8 @@
 use mirajazz::types::{ImageFormat, ImageMirroring, ImageMode, ImageRotation};
 
+// Must be unique between all the plugins, 2 characters long and match `DeviceNamespace` field in `manifest.json`
+pub const DEVICE_NAMESPACE: &str = "n3";
+
 pub const ROW_COUNT: usize = 3;
 pub const COL_COUNT: usize = 3;
 pub const KEY_COUNT: usize = 9;

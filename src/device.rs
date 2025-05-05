@@ -24,6 +24,13 @@ pub enum DeviceMessage {
     Update(String, DeviceStateUpdate),
     Connected(String, Kind, Sender<DeviceMessage>),
     Disconnected(String),
+    ShutdownAll,
+}
+
+#[derive(Debug)]
+pub enum TickValue {
+    Next,
+    ShutdownRequested,
 }
 
 /// Returns devices that matches known pid/vid pairs
@@ -89,19 +96,25 @@ pub fn device_task(candidate: CandidateDevice, disp_tx: Sender<DeviceMessage>) {
         log::info!("Reader is ready for {}", id);
 
         loop {
-            if let Err(err) = tick(id.clone(), &device, &mut device_rx, &disp_tx, &reader) {
-                log::error!("Device {} error: {}", id, err);
-
-                // Some errors are not critical and can be ignored without sending disconnected event
-                if matches!(err, MirajazzError::ImageError(_) | MirajazzError::BadData) {
-                    continue;
+            match tick(id.clone(), &device, &mut device_rx, &disp_tx, &reader) {
+                Ok(TickValue::Next) => {}
+                Ok(TickValue::ShutdownRequested) => {
+                    break;
                 }
+                Err(err) => {
+                    log::error!("Device {} error: {}", id, err);
 
-                disp_tx
-                    .blocking_send(DeviceMessage::Disconnected(id.clone()))
-                    .unwrap();
+                    // Some errors are not critical and can be ignored without sending disconnected event
+                    if matches!(err, MirajazzError::ImageError(_) | MirajazzError::BadData) {
+                        continue;
+                    }
 
-                break;
+                    disp_tx
+                        .blocking_send(DeviceMessage::Disconnected(id.clone()))
+                        .unwrap();
+
+                    break;
+                }
             }
 
             sleep(Duration::from_millis(POLL_RATE_MS));
@@ -148,7 +161,7 @@ fn tick(
     device_rx: &mut Receiver<DeviceMessage>,
     disp_tx: &Sender<DeviceMessage>,
     reader: &Arc<DeviceStateReader>,
-) -> Result<(), MirajazzError> {
+) -> Result<TickValue, MirajazzError> {
     if let Ok(message) = device_rx.try_recv() {
         log::debug!("Device task got message: {:#?}", message);
 
@@ -158,6 +171,11 @@ fn tick(
             }
             DeviceMessage::SetBrightness(_, brightness) => {
                 device.set_brightness(brightness)?;
+            }
+            DeviceMessage::ShutdownAll => {
+                device.shutdown()?;
+
+                return Ok(TickValue::ShutdownRequested);
             }
             _ => {}
         }
@@ -173,7 +191,7 @@ fn tick(
             .unwrap();
     }
 
-    Ok(())
+    Ok(TickValue::Next)
 }
 
 /// Handles different combinations of "set image" event, including clearing the specific buttons and whole device

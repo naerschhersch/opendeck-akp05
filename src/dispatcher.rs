@@ -57,6 +57,11 @@ pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>) {
                     outbound.deregister_device(id.clone()).await.unwrap();
                 }
             }
+            DeviceMessage::ShutdownAll => {
+                for (_id, device_tx) in devices.iter() {
+                    device_tx.send(DeviceMessage::ShutdownAll).await.unwrap();
+                }
+            }
             DeviceMessage::Update(id, update) => {
                 if devices.contains_key(&id) {
                     if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {

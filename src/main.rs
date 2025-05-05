@@ -1,8 +1,9 @@
 use device::{DeviceMessage, device_task, get_candidates};
 use dispatcher::{DISP_TX, dispatcher_task};
 use openaction::*;
-use std::process::exit;
 use std::thread;
+use std::time::Duration;
+use std::{process::exit, thread::sleep};
 use tokio::sync::mpsc::{self};
 
 mod device;
@@ -87,6 +88,15 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
 struct ActionEventHandler {}
 impl openaction::ActionEventHandler for ActionEventHandler {}
 
+async fn shutdown() {
+    if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
+        disp_tx.send(DeviceMessage::ShutdownAll).await.unwrap();
+    }
+
+    // Allow threads to finish
+    sleep(Duration::from_millis(2000));
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     simplelog::TermLogger::init(
@@ -101,6 +111,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::error!("Failed to initialize plugin: {}", error);
         exit(1);
     }
+
+    log::info!("Shutting down...");
+
+    shutdown().await;
 
     Ok(())
 }

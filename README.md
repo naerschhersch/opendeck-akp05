@@ -18,9 +18,9 @@ An unofficial plugin for Mirabox N3-family devices
 3. Download [udev rules](./40-opendeck-akp03.rules) and install them by copying into `/etc/udev/rules.d/` and running `sudo udevadm control --reload-rules`
 4. Unplug and plug again the device, restart OpenDeck
 
-## Current limitations
+## Opendeck version notice
 
-- Requires a custom build of OpenDeck with ajazz/mirabox support disabled:
+For OpenDeck versions < 2.5.0 this plugin requires a custom build of OpenDeck with ajazz/mirabox support disabled:
 
 <details>
   <summary>What to patch</summary>
@@ -41,8 +41,6 @@ An unofficial plugin for Mirabox N3-family devices
                                                   tokio::spawn(init(device, serial));
   ```
 </details>
-
-- Device retains images after OpenDeck is closed
 
 ## Acknowledgments
 

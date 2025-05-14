@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "opendeck-akp03"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "data-url",
  "image",

@@ -1,10 +1,12 @@
-use device::{DeviceMessage, device_task, get_candidates};
+use device::DeviceMessage;
 use dispatcher::{DISP_TX, dispatcher_task};
 use openaction::*;
-use std::thread;
-use std::time::Duration;
-use std::{process::exit, thread::sleep};
-use tokio::sync::mpsc::{self};
+use std::process::exit;
+use tokio::{
+    signal::unix::{SignalKind, signal},
+    sync::mpsc::{self},
+};
+use tokio_util::task::TaskTracker;
 
 mod device;
 mod dispatcher;
@@ -17,27 +19,12 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
         &self,
         _outbound: &mut openaction::OutboundEventManager,
     ) -> EventHandlerResult {
-        // A channel for dispatcher thread
-        let (disp_tx, disp_rx) = mpsc::channel::<DeviceMessage>(1);
-
-        // Storing dispatcher sender in a global variable
-        *DISP_TX.lock().await = Some(disp_tx.clone());
-
-        tokio::task::spawn(dispatcher_task(disp_rx));
-
-        // Scans for connected devices that (possibly) we can use
-        let candidates = get_candidates();
-
-        for device in candidates {
-            log::info!("New candidate {:#?}", device);
-
-            let disp_tx = disp_tx.clone();
-
-            // Spawn a separate thread for each device
-            thread::spawn(move || device_task(device, disp_tx));
+        if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
+            disp_tx
+                .send(DeviceMessage::PluginInitialized)
+                .await
+                .unwrap();
         }
-
-        log::info!("Finished init");
 
         Ok(())
     }
@@ -90,11 +77,26 @@ impl openaction::ActionEventHandler for ActionEventHandler {}
 
 async fn shutdown() {
     if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
-        disp_tx.send(DeviceMessage::ShutdownAll).await.unwrap();
+        match disp_tx.send(DeviceMessage::ShutdownAll).await {
+            Ok(_) => log::info!("Sent shutdown request"),
+            Err(err) => log::warn!("Error sending shutdown request: {}", err),
+        }
     }
+}
 
-    // Allow threads to finish
-    sleep(Duration::from_millis(2000));
+async fn connect() {
+    if let Err(error) = init_plugin(GlobalEventHandler {}, ActionEventHandler {}).await {
+        log::error!("Failed to initialize plugin: {}", error);
+        exit(1);
+    }
+}
+
+async fn sigterm() -> Result<(), Box<dyn std::error::Error>> {
+    let mut sig = signal(SignalKind::terminate())?;
+
+    sig.recv().await;
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -107,14 +109,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
 
-    if let Err(error) = init_plugin(GlobalEventHandler {}, ActionEventHandler {}).await {
-        log::error!("Failed to initialize plugin: {}", error);
-        exit(1);
+    // A channel for dispatcher thread
+    let (disp_tx, disp_rx) = mpsc::channel::<DeviceMessage>(1);
+
+    // Storing dispatcher sender in a global variable
+    *DISP_TX.lock().await = Some(disp_tx.clone());
+
+    let tracker = TaskTracker::new();
+
+    tracker.spawn(dispatcher_task(disp_rx, tracker.clone()));
+
+    tokio::select! {
+        _ = connect() => {},
+        _ = sigterm() => {},
     }
 
-    log::info!("Shutting down...");
+    log::info!("Shutting down");
 
     shutdown().await;
+
+    log::info!("Waiting for tasks to finish");
+
+    tracker.close();
+    tracker.wait().await;
+
+    log::info!("Tasks are finished, exiting now");
 
     Ok(())
 }

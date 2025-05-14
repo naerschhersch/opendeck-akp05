@@ -1,24 +1,22 @@
-use std::{collections::HashMap, sync::LazyLock};
-
+use crate::{
+    device::{DeviceMessage, device_task, get_candidates},
+    mappings::{COL_COUNT, ENCODER_COUNT, ROW_COUNT},
+};
 use mirajazz::state::DeviceStateUpdate;
+use openaction::OUTBOUND_EVENT_MANAGER;
+use std::{collections::HashMap, sync::LazyLock};
 use tokio::sync::{
     Mutex,
     mpsc::{Receiver, Sender},
 };
-
-use crate::{
-    device::DeviceMessage,
-    mappings::{COL_COUNT, ENCODER_COUNT, ROW_COUNT},
-};
-
-use openaction::OUTBOUND_EVENT_MANAGER;
+use tokio_util::task::TaskTracker;
 
 pub static DISP_TX: LazyLock<Mutex<Option<Sender<DeviceMessage>>>> =
     LazyLock::new(|| Mutex::new(None));
 
 /// This task juggles events between devices and OpenDeck, while keeping track of all the
 /// connected devices and their channels
-pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>) {
+pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>, tracker: TaskTracker) {
     let mut devices: HashMap<String, Sender<DeviceMessage>> = HashMap::new();
 
     log::info!("Running dispatcher");
@@ -29,6 +27,19 @@ pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>) {
         log::debug!("Dispatcher got a message: {:#?}", message);
 
         match message {
+            DeviceMessage::PluginInitialized => {
+                // Scans for connected devices that (possibly) we can use
+                let candidates = get_candidates();
+
+                for device in candidates {
+                    log::info!("New candidate {:#?}", device);
+
+                    // Run a device task on the thread pool
+                    tracker.spawn_blocking(move || device_task(device));
+                }
+
+                log::info!("Finished init");
+            }
             DeviceMessage::Connected(id, kind, device_tx) => {
                 log::info!("Registering device {}", id);
 
@@ -58,9 +69,13 @@ pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>) {
                 }
             }
             DeviceMessage::ShutdownAll => {
+                log::info!("Sending shutdown request to all devices");
+
                 for (_id, device_tx) in devices.iter() {
-                    device_tx.send(DeviceMessage::ShutdownAll).await.unwrap();
+                    let _ = device_tx.send(DeviceMessage::ShutdownAll).await;
                 }
+
+                break;
             }
             DeviceMessage::Update(id, update) => {
                 if devices.contains_key(&id) {
@@ -112,4 +127,8 @@ pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>) {
             }
         }
     }
+
+    disp_rx.close();
+
+    log::info!("Dispatcher finished");
 }

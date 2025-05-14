@@ -10,15 +10,19 @@ use mirajazz::{
 use openaction::SetImageEvent;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::mappings::{
-    AJAZZ_VID, CandidateDevice, DEVICE_NAMESPACE, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, Kind,
-    MIRABOX_VID,
+use crate::{
+    dispatcher::DISP_TX,
+    mappings::{
+        AJAZZ_VID, CandidateDevice, DEVICE_NAMESPACE, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, Kind,
+        MIRABOX_VID,
+    },
 };
 
 const POLL_RATE_MS: u64 = 50;
 
 #[derive(Debug)]
 pub enum DeviceMessage {
+    PluginInitialized,
     SetImage(String, SetImageEvent),
     SetBrightness(String, u8),
     Update(String, DeviceStateUpdate),
@@ -67,7 +71,9 @@ pub fn get_candidates() -> Vec<CandidateDevice> {
 }
 
 /// Runs in a separate thread, handling events bound to a device
-pub fn device_task(candidate: CandidateDevice, disp_tx: Sender<DeviceMessage>) {
+pub fn device_task(candidate: CandidateDevice) {
+    let disp_tx = DISP_TX.blocking_lock().as_mut().unwrap().clone();
+
     let (device_tx, mut device_rx) = mpsc::channel::<DeviceMessage>(1);
 
     let id = candidate.id.clone();
@@ -99,6 +105,7 @@ pub fn device_task(candidate: CandidateDevice, disp_tx: Sender<DeviceMessage>) {
             match tick(id.clone(), &device, &mut device_rx, &disp_tx, &reader) {
                 Ok(TickValue::Next) => {}
                 Ok(TickValue::ShutdownRequested) => {
+                    log::info!("Shutdown requested for thread {}, finishing thread", id);
                     break;
                 }
                 Err(err) => {

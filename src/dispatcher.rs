@@ -2,7 +2,7 @@ use crate::{
     device::{DeviceMessage, device_task, get_candidates},
     mappings::{COL_COUNT, ENCODER_COUNT, ROW_COUNT},
 };
-use mirajazz::state::DeviceStateUpdate;
+use mirajazz::{error::MirajazzError, state::DeviceStateUpdate};
 use openaction::OUTBOUND_EVENT_MANAGER;
 use std::{collections::HashMap, sync::LazyLock};
 use tokio::sync::{
@@ -16,7 +16,10 @@ pub static DISP_TX: LazyLock<Mutex<Option<Sender<DeviceMessage>>>> =
 
 /// This task juggles events between devices and OpenDeck, while keeping track of all the
 /// connected devices and their channels
-pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>, tracker: TaskTracker) {
+pub async fn dispatcher_task(
+    mut disp_rx: Receiver<DeviceMessage>,
+    tracker: TaskTracker,
+) -> Result<(), MirajazzError> {
     let mut devices: HashMap<String, Sender<DeviceMessage>> = HashMap::new();
 
     log::info!("Running dispatcher");
@@ -29,13 +32,12 @@ pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>, tracker: Task
         match message {
             DeviceMessage::PluginInitialized => {
                 // Scans for connected devices that (possibly) we can use
-                let candidates = get_candidates();
+                let candidates = get_candidates().await?;
 
-                for device in candidates {
-                    log::info!("New candidate {:#?}", device);
+                for candidate in candidates {
+                    log::info!("New candidate {:#?}", candidate);
 
-                    // Run a device task on the thread pool
-                    tracker.spawn_blocking(move || device_task(device));
+                    tracker.spawn(device_task(candidate));
                 }
 
                 log::info!("Finished init");
@@ -131,4 +133,6 @@ pub async fn dispatcher_task(mut disp_rx: Receiver<DeviceMessage>, tracker: Task
     disp_rx.close();
 
     log::info!("Dispatcher finished");
+
+    Ok(())
 }

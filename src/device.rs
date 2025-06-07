@@ -1,14 +1,13 @@
-use std::{process::exit, sync::Arc, thread::sleep, time::Duration};
-
 use data_url::DataUrl;
 use image::load_from_memory_with_format;
 use mirajazz::{
-    device::{Device, list_devices, new_hidapi},
+    device::{Device, list_devices},
     error::MirajazzError,
-    state::{DeviceStateReader, DeviceStateUpdate},
+    state::DeviceStateUpdate,
 };
 use openaction::SetImageEvent;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
+use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
     dispatcher::DISP_TX,
@@ -17,8 +16,6 @@ use crate::{
         MIRABOX_VID,
     },
 };
-
-const POLL_RATE_MS: u64 = 50;
 
 #[derive(Debug)]
 pub enum DeviceMessage {
@@ -31,27 +28,13 @@ pub enum DeviceMessage {
     ShutdownAll,
 }
 
-#[derive(Debug)]
-pub enum TickValue {
-    Next,
-    ShutdownRequested,
-}
-
 /// Returns devices that matches known pid/vid pairs
-pub fn get_candidates() -> Vec<CandidateDevice> {
+pub async fn get_candidates() -> Result<Vec<CandidateDevice>, MirajazzError> {
     log::info!("Looking for candidate devices");
-
-    let hidapi = match new_hidapi() {
-        Ok(hidapi) => hidapi,
-        Err(e) => {
-            log::error!("Failed to init hidapi: {e}");
-            exit(1);
-        }
-    };
 
     let mut candidates: Vec<CandidateDevice> = Vec::new();
 
-    for (vid, pid, serial) in list_devices(&hidapi, &[AJAZZ_VID, MIRABOX_VID]) {
+    for (vid, pid, serial) in list_devices(&[AJAZZ_VID, MIRABOX_VID]).await? {
         let id = format!("{}-{}", DEVICE_NAMESPACE, serial);
 
         if let Some(kind) = Kind::from_vid_pid(vid, pid) {
@@ -67,142 +50,161 @@ pub fn get_candidates() -> Vec<CandidateDevice> {
         }
     }
 
-    candidates
+    Ok(candidates)
 }
 
-/// Runs in a separate thread, handling events bound to a device
-pub fn device_task(candidate: CandidateDevice) {
-    let disp_tx = DISP_TX.blocking_lock().as_mut().unwrap().clone();
-
-    let (device_tx, mut device_rx) = mpsc::channel::<DeviceMessage>(1);
-
-    let id = candidate.id.clone();
-
-    log::info!("Connecting to {} from a device task", id);
-
-    let device = match connect(&candidate) {
-        Ok(device) => device,
-        Err(err) => {
-            return log::error!("Error while connecting to device {err}");
-        }
+/// Runs tasks for both incoming and outbound events
+///
+/// Because only outbound events task handles shutdown, uses select to terminate incoming events task
+pub async fn device_task(candidate: CandidateDevice) {
+    tokio::select! {
+        _ = outbound_events_task(&candidate) => {},
+        _ = incoming_events_task(&candidate) => {}
     };
+}
+
+/// Handles errors, returning true if should continue, returning false if an error is fatal
+async fn handle_error(id: &String, err: MirajazzError) -> bool {
+    let disp_tx = DISP_TX.lock().await.as_mut().unwrap().clone();
+
+    log::error!("Device {} error: {}", id, err);
+
+    // Some errors are not critical and can be ignored without sending disconnected event
+    if matches!(err, MirajazzError::ImageError(_) | MirajazzError::BadData) {
+        return true;
+    }
 
     disp_tx
-        .blocking_send(DeviceMessage::Connected(
-            candidate.id.clone(),
-            candidate.kind.clone(),
-            device_tx,
-        ))
-        .unwrap();
+        .send(DeviceMessage::Disconnected(id.clone()))
+        .await
+        .ok();
 
-    let device = Arc::new(device);
-    {
-        let reader = device.get_reader();
-
-        log::info!("Reader is ready for {}", id);
-
-        loop {
-            match tick(id.clone(), &device, &mut device_rx, &disp_tx, &reader) {
-                Ok(TickValue::Next) => {}
-                Ok(TickValue::ShutdownRequested) => {
-                    log::info!("Shutdown requested for thread {}, finishing thread", id);
-                    break;
-                }
-                Err(err) => {
-                    log::error!("Device {} error: {}", id, err);
-
-                    // Some errors are not critical and can be ignored without sending disconnected event
-                    if matches!(err, MirajazzError::ImageError(_) | MirajazzError::BadData) {
-                        continue;
-                    }
-
-                    disp_tx
-                        .blocking_send(DeviceMessage::Disconnected(id.clone()))
-                        .unwrap();
-
-                    break;
-                }
-            }
-
-            sleep(Duration::from_millis(POLL_RATE_MS));
-        }
-
-        drop(reader);
-    }
+    false
 }
 
-fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
-    let hidapi = match new_hidapi() {
-        Ok(hidapi) => hidapi,
-        Err(e) => {
-            log::error!("Failed to init hidapi: {e}");
-            exit(1);
-        }
-    };
-
-    let device = Device::connect(
-        &hidapi,
+async fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
+    Device::connect(
         candidate.vid,
         candidate.pid,
-        &candidate.serial,
+        candidate.serial.clone(),
         true,
         candidate.kind.supports_both_states(),
         KEY_COUNT,
         ENCODER_COUNT,
-    )?;
+    )
+    .await
+}
 
-    log::info!("Connected to {}", candidate.id);
+/// Handles events from OpenDeck to device
+async fn outbound_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzError> {
+    let disp_tx = DISP_TX.lock().await.as_mut().unwrap().clone();
+
+    let device = match connect(candidate).await {
+        Ok(device) => device,
+        Err(e) => {
+            log::error!("Error while connecting to device from outbound task {e}");
+
+            return Err(e);
+        }
+    };
+
+    log::info!("Connected to {} for outbound events", candidate.id);
 
     log::info!("Resetting a device");
 
-    device.set_brightness(50)?;
-    device.clear_all_button_images()?;
-    device.flush()?;
+    device.set_brightness(50).await?;
+    device.clear_all_button_images().await?;
+    device.flush().await?;
 
-    Ok(device)
-}
+    let (device_tx, mut device_rx) = mpsc::channel::<DeviceMessage>(1);
 
-fn tick(
-    id: String,
-    device: &Device,
-    device_rx: &mut Receiver<DeviceMessage>,
-    disp_tx: &Sender<DeviceMessage>,
-    reader: &Arc<DeviceStateReader>,
-) -> Result<TickValue, MirajazzError> {
-    if let Ok(message) = device_rx.try_recv() {
+    disp_tx
+        .send(DeviceMessage::Connected(
+            candidate.id.clone(),
+            candidate.kind.clone(),
+            device_tx,
+        ))
+        .await
+        .ok();
+
+    loop {
+        let message = match device_rx.recv().await {
+            Some(message) => message,
+            None => break,
+        };
+
         log::debug!("Device task got message: {:#?}", message);
 
-        match message {
-            DeviceMessage::SetImage(_, evt) => {
-                handle_set_image(&device, evt)?;
-            }
-            DeviceMessage::SetBrightness(_, brightness) => {
-                device.set_brightness(brightness)?;
-            }
+        let result = match message {
+            DeviceMessage::SetImage(_, evt) => handle_set_image(&device, evt).await,
+            DeviceMessage::SetBrightness(_, brightness) => device.set_brightness(brightness).await,
             DeviceMessage::ShutdownAll => {
-                device.shutdown()?;
+                device.shutdown().await?;
 
-                return Ok(TickValue::ShutdownRequested);
+                break;
             }
-            _ => {}
+            _ => Ok(()),
+        };
+
+        if let Err(e) = result {
+            if !handle_error(&candidate.id, e).await {
+                break;
+            }
         }
     }
 
-    let updates = reader.read(None, crate::inputs::process_input)?;
+    Ok(())
+}
 
-    for update in updates {
-        log::debug!("New update: {:#?}", update);
+/// Handles events from device to OpenDeck
+async fn incoming_events_task(candidate: &CandidateDevice) {
+    let disp_tx = DISP_TX.lock().await.as_mut().unwrap().clone();
 
-        disp_tx
-            .blocking_send(DeviceMessage::Update(id.clone(), update))
-            .unwrap();
-    }
+    let device = match connect(candidate).await {
+        Ok(device) => device,
+        Err(e) => {
+            log::error!("Error while connecting to device from incoming task {e}");
 
-    Ok(TickValue::Next)
+            return;
+        }
+    };
+
+    log::info!("Connected to {} for incoming events", candidate.id);
+
+    let device = Arc::new(device);
+    {
+        let reader = device.get_reader(crate::inputs::process_input);
+
+        log::info!("Reader is ready for {}", candidate.id);
+
+        loop {
+            let updates = match reader.read(None).await {
+                Ok(updates) => updates,
+                Err(e) => {
+                    if !handle_error(&candidate.id, e).await {
+                        break;
+                    }
+
+                    continue;
+                }
+            };
+
+            for update in updates {
+                log::debug!("New update: {:#?}", update);
+
+                disp_tx
+                    .send(DeviceMessage::Update(candidate.id.clone(), update))
+                    .await
+                    .ok();
+            }
+        }
+
+        drop(reader);
+    };
 }
 
 /// Handles different combinations of "set image" event, including clearing the specific buttons and whole device
-fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
+async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
     match (evt.position, evt.image) {
         (Some(position), Some(image)) => {
             // Device has 6 buttons with screens and 3 buttons without screens, so ignore anything above 5
@@ -225,8 +227,10 @@ fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzE
 
             let image = load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg)?;
 
-            device.set_button_image(position, IMAGE_FORMAT, image)?;
-            device.flush()?;
+            device
+                .set_button_image(position, IMAGE_FORMAT, image)
+                .await?;
+            device.flush().await?;
         }
         (Some(position), None) => {
             // Device has 6 buttons with screens and 3 buttons without screens, so only clear below 6
@@ -234,12 +238,12 @@ fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzE
                 return Ok(());
             }
 
-            device.clear_button_image(position)?;
-            device.flush()?;
+            device.clear_button_image(position).await?;
+            device.flush().await?;
         }
         (None, None) => {
-            device.clear_all_button_images()?;
-            device.flush()?;
+            device.clear_all_button_images().await?;
+            device.flush().await?;
         }
         _ => {}
     }

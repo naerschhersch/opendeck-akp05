@@ -34,15 +34,13 @@ pub async fn get_candidates() -> Result<Vec<CandidateDevice>, MirajazzError> {
 
     let mut candidates: Vec<CandidateDevice> = Vec::new();
 
-    for (vid, pid, serial) in list_devices(&[AJAZZ_VID, MIRABOX_VID]).await? {
-        let id = format!("{}-{}", DEVICE_NAMESPACE, serial);
+    for dev in list_devices(&[AJAZZ_VID, MIRABOX_VID]).await? {
+        let id = format!("{}-{}", DEVICE_NAMESPACE, dev.serial_number);
 
-        if let Some(kind) = Kind::from_vid_pid(vid, pid) {
+        if let Some(kind) = Kind::from_vid_pid(dev.vid, dev.pid) {
             candidates.push(CandidateDevice {
                 id,
-                vid,
-                pid,
-                serial,
+                info: dev,
                 kind,
             })
         } else {
@@ -84,9 +82,7 @@ async fn handle_error(id: &String, err: MirajazzError) -> bool {
 
 async fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
     Device::connect(
-        candidate.vid,
-        candidate.pid,
-        candidate.serial.clone(),
+        candidate.info.clone(),
         true,
         candidate.kind.supports_both_states(),
         KEY_COUNT,

@@ -1,17 +1,24 @@
-use device::DeviceMessage;
-use dispatcher::{DISP_TX, dispatcher_task};
+use device::{handle_error, handle_set_image};
+use mirajazz::device::Device;
 use openaction::*;
-use std::process::exit;
-use tokio::{
-    signal::unix::{SignalKind, signal},
-    sync::mpsc::{self},
-};
-use tokio_util::task::TaskTracker;
+use std::{collections::HashMap, process::exit, sync::LazyLock};
+use tokio::sync::{Mutex, RwLock};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use watcher::watcher_task;
+
+#[cfg(not(target_os = "windows"))]
+use tokio::signal::unix::{SignalKind, signal};
 
 mod device;
-mod dispatcher;
 mod inputs;
 mod mappings;
+mod watcher;
+
+pub static DEVICES: LazyLock<RwLock<HashMap<String, Device>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+pub static TOKENS: LazyLock<RwLock<HashMap<String, CancellationToken>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+pub static TRACKER: LazyLock<Mutex<TaskTracker>> = LazyLock::new(|| Mutex::new(TaskTracker::new()));
 
 struct GlobalEventHandler {}
 impl openaction::GlobalEventHandler for GlobalEventHandler {
@@ -19,12 +26,17 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
         &self,
         _outbound: &mut openaction::OutboundEventManager,
     ) -> EventHandlerResult {
-        if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
-            disp_tx
-                .send(DeviceMessage::PluginInitialized)
-                .await
-                .unwrap();
-        }
+        let tracker = TRACKER.lock().await.clone();
+
+        let token = CancellationToken::new();
+        tracker.spawn(watcher_task(token.clone()));
+
+        TOKENS
+            .write()
+            .await
+            .insert("_watcher_task".to_string(), token);
+
+        log::info!("Plugin initialized");
 
         Ok(())
     }
@@ -38,11 +50,11 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
 
         let id = event.device.clone();
 
-        if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
-            disp_tx
-                .send(DeviceMessage::SetImage(id, event.clone()))
+        if let Some(device) = DEVICES.read().await.get(&event.device) {
+            handle_set_image(device, event)
                 .await
-                .unwrap();
+                .map_err(async |err| handle_error(&id, err).await)
+                .ok();
         } else {
             log::error!("Received event for unknown device: {}", event.device);
         }
@@ -59,11 +71,12 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
 
         let id = event.device.clone();
 
-        if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
-            disp_tx
-                .send(DeviceMessage::SetBrightness(id, event.brightness))
+        if let Some(device) = DEVICES.read().await.get(&event.device) {
+            device
+                .set_brightness(event.brightness)
                 .await
-                .unwrap();
+                .map_err(async |err| handle_error(&id, err).await)
+                .ok();
         } else {
             log::error!("Received event for unknown device: {}", event.device);
         }
@@ -76,11 +89,10 @@ struct ActionEventHandler {}
 impl openaction::ActionEventHandler for ActionEventHandler {}
 
 async fn shutdown() {
-    if let Some(disp_tx) = DISP_TX.lock().await.as_mut() {
-        match disp_tx.send(DeviceMessage::ShutdownAll).await {
-            Ok(_) => log::info!("Sent shutdown request"),
-            Err(err) => log::warn!("Error sending shutdown request: {}", err),
-        }
+    let tokens = TOKENS.write().await;
+
+    for (_, token) in tokens.iter() {
+        token.cancel();
     }
 }
 
@@ -91,10 +103,20 @@ async fn connect() {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn sigterm() -> Result<(), Box<dyn std::error::Error>> {
     let mut sig = signal(SignalKind::terminate())?;
 
     sig.recv().await;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+async fn sigterm() -> Result<(), Box<dyn std::error::Error>> {
+    // Future that would never resolve, so select only acts on OpenDeck connection loss
+    // TODO: Proper windows termination handling
+    std::future::pending::<()>().await;
 
     Ok(())
 }
@@ -109,16 +131,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
 
-    // A channel for dispatcher thread
-    let (disp_tx, disp_rx) = mpsc::channel::<DeviceMessage>(1);
-
-    // Storing dispatcher sender in a global variable
-    *DISP_TX.lock().await = Some(disp_tx.clone());
-
-    let tracker = TaskTracker::new();
-
-    tracker.spawn(dispatcher_task(disp_rx, tracker.clone()));
-
     tokio::select! {
         _ = connect() => {},
         _ = sigterm() => {},
@@ -127,6 +139,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::info!("Shutting down");
 
     shutdown().await;
+
+    let tracker = TRACKER.lock().await.clone();
 
     log::info!("Waiting for tasks to finish");
 

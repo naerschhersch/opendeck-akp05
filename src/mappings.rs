@@ -1,4 +1,7 @@
-use mirajazz::types::{DeviceInfo, ImageFormat, ImageMirroring, ImageMode, ImageRotation};
+use mirajazz::{
+    device::DeviceQuery,
+    types::{HidDeviceInfo, ImageFormat, ImageMirroring, ImageMode, ImageRotation},
+};
 
 // Must be unique between all the plugins, 2 characters long and match `DeviceNamespace` field in `manifest.json`
 pub const DEVICE_NAMESPACE: &str = "n3";
@@ -31,6 +34,14 @@ pub const AKP03E_PID: u16 = 0x3002; // Not sure if it's rev 1 or 2, so for now m
 pub const AKP03R_PID: u16 = 0x1003;
 
 pub const N3EN_PID: u16 = 0x1003;
+
+// Map all queries to usage page 65440 and usage id 2 for now
+pub const AKP03_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, AJAZZ_VID, AKP03_PID);
+pub const AKP03E_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, AJAZZ_VID, AKP03E_PID);
+pub const AKP03R_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, AJAZZ_VID, AKP03R_PID);
+pub const N3EN_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, MIRABOX_VID, N3EN_PID);
+
+pub const QUERIES: [DeviceQuery; 4] = [AKP03_QUERY, AKP03E_QUERY, AKP03R_QUERY, N3EN_QUERY];
 
 impl Kind {
     /// Matches devices VID+PID pairs to correct kinds
@@ -74,9 +85,9 @@ impl Kind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CandidateDevice {
     pub id: String,
-    pub info: DeviceInfo,
+    pub dev: HidDeviceInfo,
     pub kind: Kind,
 }

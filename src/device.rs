@@ -1,70 +1,77 @@
 use data_url::DataUrl;
 use image::load_from_memory_with_format;
-use mirajazz::{
-    device::{Device, list_devices},
-    error::MirajazzError,
-    state::DeviceStateUpdate,
-};
-use openaction::SetImageEvent;
-use std::sync::Arc;
-use tokio::sync::mpsc::{self, Sender};
+use mirajazz::{device::Device, error::MirajazzError, state::DeviceStateUpdate};
+use openaction::{OUTBOUND_EVENT_MANAGER, SetImageEvent};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
-    dispatcher::DISP_TX,
-    mappings::{
-        AJAZZ_VID, CandidateDevice, DEVICE_NAMESPACE, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, Kind,
-        MIRABOX_VID,
-    },
+    DEVICES, TOKENS,
+    mappings::{COL_COUNT, CandidateDevice, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, ROW_COUNT},
 };
 
-#[derive(Debug)]
-pub enum DeviceMessage {
-    PluginInitialized,
-    SetImage(String, SetImageEvent),
-    SetBrightness(String, u8),
-    Update(String, DeviceStateUpdate),
-    Connected(String, Kind, Sender<DeviceMessage>),
-    Disconnected(String),
-    ShutdownAll,
-}
+/// Initializes a device and listens for events
+pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
+    log::info!("Running device task for {:?}", candidate);
 
-/// Returns devices that matches known pid/vid pairs
-pub async fn get_candidates() -> Result<Vec<CandidateDevice>, MirajazzError> {
-    log::info!("Looking for candidate devices");
+    // Wrap in a closure so we can use `?` operator
+    let device = async || -> Result<Device, MirajazzError> {
+        let device = connect(&candidate).await?;
 
-    let mut candidates: Vec<CandidateDevice> = Vec::new();
+        device.set_brightness(50).await?;
+        device.clear_all_button_images().await?;
+        device.flush().await?;
 
-    for dev in list_devices(&[AJAZZ_VID, MIRABOX_VID]).await? {
-        let id = format!("{}-{}", DEVICE_NAMESPACE, dev.serial_number);
+        Ok(device)
+    }()
+    .await;
 
-        if let Some(kind) = Kind::from_vid_pid(dev.vid, dev.pid) {
-            candidates.push(CandidateDevice {
-                id,
-                info: dev,
-                kind,
-            })
-        } else {
-            continue;
+    let device: Device = match device {
+        Ok(device) => device,
+        Err(err) => {
+            handle_error(&candidate.id, err).await;
+
+            log::error!(
+                "Had error during device init, finishing device task: {:?}",
+                candidate
+            );
+
+            return;
         }
+    };
+
+    log::debug!("Registering device {}", candidate.id);
+    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
+        outbound
+            .register_device(
+                candidate.id.clone(),
+                candidate.kind.human_name(),
+                ROW_COUNT as u8,
+                COL_COUNT as u8,
+                ENCODER_COUNT as u8,
+                0,
+            )
+            .await
+            .unwrap();
     }
 
-    Ok(candidates)
-}
+    DEVICES.write().await.insert(candidate.id.clone(), device);
 
-/// Runs tasks for both incoming and outbound events
-///
-/// Because only outbound events task handles shutdown, uses select to terminate incoming events task
-pub async fn device_task(candidate: CandidateDevice) {
     tokio::select! {
-        _ = outbound_events_task(&candidate) => {},
-        _ = incoming_events_task(&candidate) => {}
+        _ = device_events_task(&candidate) => {},
+        _ = token.cancelled() => {}
     };
+
+    log::info!("Shutting down device {:?}", candidate);
+
+    if let Some(device) = DEVICES.read().await.get(&candidate.id) {
+        device.shutdown().await.ok();
+    }
+
+    log::info!("Device task finished for {:?}", candidate);
 }
 
 /// Handles errors, returning true if should continue, returning false if an error is fatal
-async fn handle_error(id: &String, err: MirajazzError) -> bool {
-    let disp_tx = DISP_TX.lock().await.as_mut().unwrap().clone();
-
+pub async fn handle_error(id: &String, err: MirajazzError) -> bool {
     log::error!("Device {} error: {}", id, err);
 
     // Some errors are not critical and can be ignored without sending disconnected event
@@ -72,79 +79,95 @@ async fn handle_error(id: &String, err: MirajazzError) -> bool {
         return true;
     }
 
-    disp_tx
-        .send(DeviceMessage::Disconnected(id.clone()))
-        .await
-        .ok();
+    log::debug!("Deregistering device {}", id);
+    if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
+        outbound.deregister_device(id.clone()).await.unwrap();
+    }
+
+    log::debug!("Cancelling tasks for device {}", id);
+    if let Some(token) = TOKENS.read().await.get(id) {
+        token.cancel();
+    }
+
+    log::debug!("Removing device {} from the list", id);
+    DEVICES.write().await.remove(id);
+
+    log::debug!("Finished clean-up for {}", id);
 
     false
 }
 
-async fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
-    Device::connect(
-        candidate.info.clone(),
+pub async fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
+    let result = Device::connect(
+        &candidate.dev,
         true,
         candidate.kind.supports_both_states(),
         KEY_COUNT,
         ENCODER_COUNT,
     )
-    .await
+    .await;
+
+    match result {
+        Ok(device) => Ok(device),
+        Err(e) => {
+            log::error!("Error while connecting to device: {e}");
+
+            Err(e)
+        }
+    }
 }
 
-/// Handles events from OpenDeck to device
-async fn outbound_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzError> {
-    let disp_tx = DISP_TX.lock().await.as_mut().unwrap().clone();
+/// Handles events from device to OpenDeck
+async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzError> {
+    log::info!("Connecting to {} for incoming events", candidate.id);
 
-    let device = match connect(candidate).await {
-        Ok(device) => device,
-        Err(e) => {
-            log::error!("Error while connecting to device from outbound task {e}");
-
-            return Err(e);
-        }
+    let devices_lock = DEVICES.read().await;
+    let reader = match devices_lock.get(&candidate.id) {
+        Some(device) => device.get_reader(crate::inputs::process_input),
+        None => return Ok(()),
     };
+    drop(devices_lock);
 
-    log::info!("Connected to {} for outbound events", candidate.id);
+    log::info!("Connected to {} for incoming events", candidate.id);
 
-    log::info!("Resetting a device");
-
-    device.set_brightness(50).await?;
-    device.clear_all_button_images().await?;
-    device.flush().await?;
-
-    let (device_tx, mut device_rx) = mpsc::channel::<DeviceMessage>(1);
-
-    disp_tx
-        .send(DeviceMessage::Connected(
-            candidate.id.clone(),
-            candidate.kind.clone(),
-            device_tx,
-        ))
-        .await
-        .ok();
+    log::info!("Reader is ready for {}", candidate.id);
 
     loop {
-        let message = match device_rx.recv().await {
-            Some(message) => message,
-            None => break,
-        };
+        log::info!("Reading updates...");
 
-        log::debug!("Device task got message: {:#?}", message);
+        let updates = match reader.read(None).await {
+            Ok(updates) => updates,
+            Err(e) => {
+                if !handle_error(&candidate.id, e).await {
+                    break;
+                }
 
-        let result = match message {
-            DeviceMessage::SetImage(_, evt) => handle_set_image(&device, evt).await,
-            DeviceMessage::SetBrightness(_, brightness) => device.set_brightness(brightness).await,
-            DeviceMessage::ShutdownAll => {
-                device.shutdown().await?;
-
-                break;
+                continue;
             }
-            _ => Ok(()),
         };
 
-        if let Err(e) = result {
-            if !handle_error(&candidate.id, e).await {
-                break;
+        for update in updates {
+            log::debug!("New update: {:#?}", update);
+
+            let id = candidate.id.clone();
+
+            if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
+                match update {
+                    DeviceStateUpdate::ButtonDown(key) => outbound.key_down(id, key).await.unwrap(),
+                    DeviceStateUpdate::ButtonUp(key) => outbound.key_up(id, key).await.unwrap(),
+                    DeviceStateUpdate::EncoderDown(encoder) => {
+                        outbound.encoder_down(id, encoder).await.unwrap();
+                    }
+                    DeviceStateUpdate::EncoderUp(encoder) => {
+                        outbound.encoder_up(id, encoder).await.unwrap();
+                    }
+                    DeviceStateUpdate::EncoderTwist(encoder, val) => {
+                        outbound
+                            .encoder_change(id, encoder, val as i16)
+                            .await
+                            .unwrap();
+                    }
+                }
             }
         }
     }
@@ -152,55 +175,8 @@ async fn outbound_events_task(candidate: &CandidateDevice) -> Result<(), Mirajaz
     Ok(())
 }
 
-/// Handles events from device to OpenDeck
-async fn incoming_events_task(candidate: &CandidateDevice) {
-    let disp_tx = DISP_TX.lock().await.as_mut().unwrap().clone();
-
-    let device = match connect(candidate).await {
-        Ok(device) => device,
-        Err(e) => {
-            log::error!("Error while connecting to device from incoming task {e}");
-
-            return;
-        }
-    };
-
-    log::info!("Connected to {} for incoming events", candidate.id);
-
-    let device = Arc::new(device);
-    {
-        let reader = device.get_reader(crate::inputs::process_input);
-
-        log::info!("Reader is ready for {}", candidate.id);
-
-        loop {
-            let updates = match reader.read(None).await {
-                Ok(updates) => updates,
-                Err(e) => {
-                    if !handle_error(&candidate.id, e).await {
-                        break;
-                    }
-
-                    continue;
-                }
-            };
-
-            for update in updates {
-                log::debug!("New update: {:#?}", update);
-
-                disp_tx
-                    .send(DeviceMessage::Update(candidate.id.clone(), update))
-                    .await
-                    .ok();
-            }
-        }
-
-        drop(reader);
-    };
-}
-
 /// Handles different combinations of "set image" event, including clearing the specific buttons and whole device
-async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
+pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
     match (evt.position, evt.image) {
         (Some(position), Some(image)) => {
             // Device has 6 buttons with screens and 3 buttons without screens, so ignore anything above 5

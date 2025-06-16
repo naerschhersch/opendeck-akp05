@@ -11,13 +11,6 @@ pub const COL_COUNT: usize = 3;
 pub const KEY_COUNT: usize = 9;
 pub const ENCODER_COUNT: usize = 3;
 
-pub const IMAGE_FORMAT: ImageFormat = ImageFormat {
-    mode: ImageMode::JPEG,
-    size: (60, 60),
-    rotation: ImageRotation::Rot0,
-    mirror: ImageMirroring::None,
-};
-
 #[derive(Debug, Clone)]
 pub enum Kind {
     AKP03,
@@ -82,6 +75,23 @@ impl Kind {
             Self::N3EN => "Mirabox N3EN",
         }
         .to_string()
+    }
+
+    pub fn image_format(&self) -> ImageFormat {
+        match &self {
+            Self::AKP03E | Self::AKP03R => ImageFormat {
+                mode: ImageMode::JPEG,
+                size: (60, 60),
+                rotation: ImageRotation::Rot0,
+                mirror: ImageMirroring::None,
+            },
+            Self::AKP03 | Self::N3EN => ImageFormat {
+                mode: ImageMode::JPEG,
+                size: (60, 60),
+                rotation: ImageRotation::Rot90,
+                mirror: ImageMirroring::None,
+            },
+        }
     }
 }
 

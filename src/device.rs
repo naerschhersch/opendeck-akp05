@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     DEVICES, TOKENS,
-    mappings::{COL_COUNT, CandidateDevice, ENCODER_COUNT, IMAGE_FORMAT, KEY_COUNT, ROW_COUNT},
+    mappings::{COL_COUNT, CandidateDevice, ENCODER_COUNT, KEY_COUNT, Kind, ROW_COUNT},
 };
 
 /// Initializes a device and listens for events
@@ -200,7 +200,13 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
             let image = load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg)?;
 
             device
-                .set_button_image(position, IMAGE_FORMAT, image)
+                .set_button_image(
+                    position,
+                    Kind::from_vid_pid(device.vid, device.pid)
+                        .unwrap()
+                        .image_format(),
+                    image,
+                )
                 .await?;
             device.flush().await?;
         }

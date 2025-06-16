@@ -48,6 +48,12 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
     ) -> EventHandlerResult {
         log::debug!("Asked to set image: {:#?}", event);
 
+        // Skip knobs images
+        if event.controller == Some("Encoder".to_string()) {
+            log::debug!("Looks like a knob, no need to set image");
+            return Ok(());
+        }
+
         let id = event.device.clone();
 
         if let Some(device) = DEVICES.read().await.get(&event.device) {

@@ -4,10 +4,16 @@
   "Author": "Andrey Viktorov",
   "Version": "0.5.2",
   "PluginUUID": "st.lynx.plugins.opendeck-akp03",
-  "CodePathLin": "opendeck-akp03",
+  "CodePathLin": "opendeck-akp03-linux",
+  "CodePathMac": "opendeck-akp03-mac",
+  "CodePathWin": "opendeck-akp03-win.exe",
   "Icon": "assets/icon",
   "Category": "Hardware",
-  "OS": [{ "Platform": "linux" }],
+  "OS": [
+    { "Platform": "linux" },
+    { "Platform": "mac", "MinimumVersion": "11.3" },
+    { "Platform": "windows", "MinimumVersion": "10" }
+  ],
   "Actions": [],
   "DeviceNamespace": "n3"
 }

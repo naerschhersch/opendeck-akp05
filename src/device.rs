@@ -179,11 +179,6 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
 pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
     match (evt.position, evt.image) {
         (Some(position), Some(image)) => {
-            // Device has 6 buttons with screens and 3 buttons without screens, so ignore anything above 5
-            if position > 5 {
-                return Ok(());
-            }
-
             log::info!("Setting image for button {}", position);
 
             // OpenDeck sends image as a data url, so parse it using a library
@@ -211,11 +206,6 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
             device.flush().await?;
         }
         (Some(position), None) => {
-            // Device has 6 buttons with screens and 3 buttons without screens, so only clear below 6
-            if position > 5 {
-                return Ok(());
-            }
-
             device.clear_button_image(position).await?;
             device.flush().await?;
         }

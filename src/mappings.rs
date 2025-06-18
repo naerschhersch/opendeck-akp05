@@ -61,6 +61,7 @@ impl Kind {
     pub fn supports_both_states(&self) -> bool {
         match &self {
             Self::N3EN => true,
+            Self::Akp03Erev2 => true,
             _ => false,
         }
     }

@@ -36,20 +36,16 @@ You'll need:
 
 - A Linux OS of some sort
 - Rust 1.87 and up with `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu` targets installed
-- Docker + buildx
-- [cross](https://github.com/cross-rs/cross)
+- Docker
 - [just](https://just.systems)
-- [lipo](https://github.com/konoui/lipo)
-- `MacOSX11.3.sdk.tar.xz` \*wink-wink\*
 
-### Building Docker images for macOS cross-compilation
+### Preparing environment
 
-Follow [this](https://github.com/cross-rs/cross-toolchains/tree/main?tab=readme-ov-file#apple-targets) guide to build these local images:
+```sh
+$ just prepare
+```
 
-- `x86_64-apple-darwin-cross`
-- `aarch64-apple-darwin-cross`
-
-You'll need that one `tar.xz` file, which you can obtain either via osxcross or \*somewhere on the internet\*, but Apple EULA and stuff. The SDK version **must** be 11.3.
+This will build docker image for macOS crosscompilation
 
 ### Building a release package
 

@@ -1,0 +1,21 @@
+ARG RUST_VERSION=1.87.0
+
+FROM rust:$RUST_VERSION
+
+# Install Zig
+ARG ZIG_VERSION=0.13.0
+RUN curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-$(uname -m)-${ZIG_VERSION}.tar.xz" | tar -J -x -C /usr/local && \
+    ln -s "/usr/local/zig-linux-$(uname -m)-${ZIG_VERSION}/zig" /usr/local/bin/zig
+
+# Install macOS SDKs
+RUN curl -L "https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX10.9.sdk.tar.xz" | tar -J -x -C /opt
+RUN curl -L "https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz" | tar -J -x -C /opt
+ENV SDKROOT=/opt/MacOSX11.3.sdk
+
+# Install Rust targets
+RUN rustup target add \
+    x86_64-apple-darwin \
+    aarch64-apple-darwin
+
+# Install cargo-zigbuild
+RUN cargo install --locked cargo-zigbuild

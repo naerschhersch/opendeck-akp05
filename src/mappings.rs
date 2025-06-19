@@ -28,11 +28,11 @@ pub const AKP03E_REV2_PID: u16 = 0x3002;
 
 pub const N3EN_PID: u16 = 0x1003;
 
-// Map all queries to usage page 65440 and usage id 2 for now
-pub const AKP03_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, AJAZZ_VID, AKP03_PID);
-pub const AKP03R_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, AJAZZ_VID, AKP03R_PID);
-pub const AKP03E_REV2_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, AJAZZ_VID, AKP03E_REV2_PID);
-pub const N3EN_QUERY: DeviceQuery = DeviceQuery::new(65440, 2, MIRABOX_VID, N3EN_PID);
+// Map all queries to usage page 65440 and usage id 1 for now
+pub const AKP03_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03_PID);
+pub const AKP03R_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03R_PID);
+pub const AKP03E_REV2_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03E_REV2_PID);
+pub const N3EN_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, MIRABOX_VID, N3EN_PID);
 
 pub const QUERIES: [DeviceQuery; 4] = [AKP03_QUERY, AKP03R_QUERY, AKP03E_REV2_QUERY, N3EN_QUERY];
 

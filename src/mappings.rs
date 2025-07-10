@@ -100,7 +100,7 @@ impl Kind {
             Self::Akp03Erev2 => "Ajazz AKP03E (rev. 2)",
             Self::N3 => "Mirabox N3",
             Self::N3EN => "Mirabox N3EN",
-            Self::SoomfonSE => "Soomfon Stream Controller Deck SE",
+            Self::SoomfonSE => "Soomfon Stream Controller SE",
         }
         .to_string()
     }

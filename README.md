@@ -15,7 +15,7 @@ Requires OpenDeck 2.5.0 or newer
 - Ajazz AKP03R (0300:1003)
 - Mirabox N3 (6602:1002)
 - Mirabox N3EN (6603:1003)
-- Soomfon Stream Controller Deck SE (1500:3001)
+- Soomfon Stream Controller SE (1500:3001)
 
 ## Platform support
 

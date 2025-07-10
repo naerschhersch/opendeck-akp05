@@ -15,6 +15,7 @@ Requires OpenDeck 2.5.0 or newer
 - Ajazz AKP03R (0300:1003)
 - Mirabox N3 (6602:1002)
 - Mirabox N3EN (6603:1003)
+- Soomfon Stream Controller Deck SE (1500:3001)
 
 ## Platform support
 
@@ -29,6 +30,10 @@ Requires OpenDeck 2.5.0 or newer
 3. Download [udev rules](./40-opendeck-akp03.rules) and install them by copying into `/etc/udev/rules.d/` and running `sudo udevadm control --reload-rules`
 4. Unplug and plug again the device, restart OpenDeck
 
+## Adding new devices
+
+Read [this wiki page](https://github.com/4ndv/opendeck-akp03/wiki/Adding-support-for-new-devices) for more information.
+
 ## Building
 
 ### Prerequisites
@@ -37,8 +42,22 @@ You'll need:
 
 - A Linux OS of some sort
 - Rust 1.87 and up with `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu` targets installed
+- gcc with Windows support
 - Docker
 - [just](https://just.systems)
+
+On Arch Linux:
+
+```sh
+sudo pacman -S just mingw-w64-gcc mingw-w64-binutils
+```
+
+Adding rust targets:
+
+```sh
+rustup target add x86_64-pc-windows-gnu
+rustup target add x86_64-unknown-linux-gnu
+```
 
 ### Preparing environment
 

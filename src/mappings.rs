@@ -14,8 +14,9 @@ pub const ENCODER_COUNT: usize = 3;
 #[derive(Debug, Clone)]
 pub enum Kind {
     Akp03,
-    Akp03Erev2,
+    Akp03E,
     Akp03R,
+    Akp03Erev2,
     N3,
     N3EN,
     SoomfonSE,
@@ -27,6 +28,7 @@ pub const N3_VID: u16 = 0x6602;
 pub const SOOMFON_VID: u16 = 0x1500;
 
 pub const AKP03_PID: u16 = 0x1001;
+pub const AKP03E_PID: u16 = 0x1002;
 pub const AKP03R_PID: u16 = 0x1003;
 pub const AKP03E_REV2_PID: u16 = 0x3002;
 pub const N3_PID: u16 = 0x1002;
@@ -35,14 +37,16 @@ pub const SOOMFON_SE_PID: u16 = 0x3001;
 
 // Map all queries to usage page 65440 and usage id 1 for now
 pub const AKP03_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03_PID);
+pub const AKP03E_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03E_PID);
 pub const AKP03R_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03R_PID);
 pub const AKP03E_REV2_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03E_REV2_PID);
 pub const N3_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, N3_VID, N3_PID);
 pub const N3EN_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, MIRABOX_VID, N3EN_PID);
 pub const SOOMFON_SE_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, SOOMFON_VID, SOOMFON_SE_PID);
 
-pub const QUERIES: [DeviceQuery; 6] = [
+pub const QUERIES: [DeviceQuery; 7] = [
     AKP03_QUERY,
+    AKP03E_QUERY,
     AKP03R_QUERY,
     AKP03E_REV2_QUERY,
     N3_QUERY,
@@ -56,6 +60,7 @@ impl Kind {
         match vid {
             AJAZZ_VID => match pid {
                 AKP03_PID => Some(Kind::Akp03),
+                AKP03E_PID => Some(Kind::Akp03E),
                 AKP03R_PID => Some(Kind::Akp03R),
                 AKP03E_REV2_PID => Some(Kind::Akp03Erev2),
                 _ => None,
@@ -96,6 +101,7 @@ impl Kind {
     pub fn human_name(&self) -> String {
         match &self {
             Self::Akp03 => "Ajazz AKP03",
+            Self::Akp03E => "Ajazz AKP03E",
             Self::Akp03R => "Ajazz AKP03R",
             Self::Akp03Erev2 => "Ajazz AKP03E (rev. 2)",
             Self::N3 => "Mirabox N3",
@@ -107,7 +113,7 @@ impl Kind {
 
     pub fn image_format(&self) -> ImageFormat {
         match &self {
-            Self::Akp03 | Self::Akp03R | Self::N3 => ImageFormat {
+            Self::Akp03 | Self::Akp03E | Self::Akp03R | Self::N3 => ImageFormat {
                 mode: ImageMode::JPEG,
                 size: (60, 60),
                 rotation: ImageRotation::Rot0,

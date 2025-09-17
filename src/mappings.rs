@@ -20,12 +20,14 @@ pub enum Kind {
     N3,
     N3EN,
     SoomfonSE,
+    MSDTWO,
 }
 
 pub const AJAZZ_VID: u16 = 0x0300;
 pub const MIRABOX_VID: u16 = 0x6603;
 pub const N3_VID: u16 = 0x6602;
 pub const SOOMFON_VID: u16 = 0x1500;
+pub const MARS_GAMING_VID: u16 = 0x0B00;
 
 pub const AKP03_PID: u16 = 0x1001;
 pub const AKP03E_PID: u16 = 0x1002;
@@ -34,6 +36,7 @@ pub const AKP03E_REV2_PID: u16 = 0x3002;
 pub const N3_PID: u16 = 0x1002;
 pub const N3EN_PID: u16 = 0x1003;
 pub const SOOMFON_SE_PID: u16 = 0x3001;
+pub const MSD_TWO_PID: u16 = 0x1001;
 
 // Map all queries to usage page 65440 and usage id 1 for now
 pub const AKP03_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP03_PID);
@@ -43,8 +46,9 @@ pub const AKP03E_REV2_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID,
 pub const N3_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, N3_VID, N3_PID);
 pub const N3EN_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, MIRABOX_VID, N3EN_PID);
 pub const SOOMFON_SE_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, SOOMFON_VID, SOOMFON_SE_PID);
+pub const MSD_TWO_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, MARS_GAMING_VID, MSD_TWO_PID);
 
-pub const QUERIES: [DeviceQuery; 7] = [
+pub const QUERIES: [DeviceQuery; 8] = [
     AKP03_QUERY,
     AKP03E_QUERY,
     AKP03R_QUERY,
@@ -52,6 +56,7 @@ pub const QUERIES: [DeviceQuery; 7] = [
     N3_QUERY,
     N3EN_QUERY,
     SOOMFON_SE_QUERY,
+    MSD_TWO_QUERY,
 ];
 
 impl Kind {
@@ -81,6 +86,11 @@ impl Kind {
                 _ => None,
             },
 
+            MARS_GAMING_VID => match pid {
+                MSD_TWO_PID => Some(Kind::MSDTWO),
+                _ => None,
+            },
+
             _ => None,
         }
     }
@@ -107,13 +117,14 @@ impl Kind {
             Self::N3 => "Mirabox N3",
             Self::N3EN => "Mirabox N3EN",
             Self::SoomfonSE => "Soomfon Stream Controller SE",
+            Self::MSDTWO => "Mars Gaming MSD-TWO",
         }
         .to_string()
     }
 
     pub fn image_format(&self) -> ImageFormat {
         match &self {
-            Self::Akp03 | Self::Akp03E | Self::Akp03R | Self::N3 => ImageFormat {
+            Self::Akp03 | Self::Akp03E | Self::Akp03R | Self::N3 | Self::MSDTWO => ImageFormat {
                 mode: ImageMode::JPEG,
                 size: (60, 60),
                 rotation: ImageRotation::Rot0,

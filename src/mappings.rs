@@ -95,17 +95,6 @@ impl Kind {
         }
     }
 
-    /// Returns true for devices that emitting two events per key press, instead of one
-    /// Currently only one device does that
-    pub fn supports_both_states(&self) -> bool {
-        match &self {
-            Self::N3EN => true,
-            Self::Akp03Erev2 => true,
-            Self::SoomfonSE => true,
-            _ => false,
-        }
-    }
-
     /// There is no point relying on manufacturer/device names reported by the USB stack,
     /// so we return custom names for all the kinds of devices
     pub fn human_name(&self) -> String {
@@ -122,21 +111,32 @@ impl Kind {
         .to_string()
     }
 
+    /// Returns protocol version for device
+    pub fn protocol_version(&self) -> usize {
+        match self {
+            Self::N3EN => 3,
+            Self::Akp03Erev2 => 3,
+            Self::SoomfonSE => 3,
+            _ => 2,
+        }
+    }
+
     pub fn image_format(&self) -> ImageFormat {
-        match &self {
-            Self::Akp03 | Self::Akp03E | Self::Akp03R | Self::N3 | Self::MSDTWO => ImageFormat {
-                mode: ImageMode::JPEG,
-                size: (60, 60),
-                rotation: ImageRotation::Rot0,
-                mirror: ImageMirroring::None,
-            },
-            Self::Akp03Erev2 | Self::N3EN | Self::SoomfonSE => ImageFormat {
+        if self.protocol_version() == 3 {
+            return ImageFormat {
                 mode: ImageMode::JPEG,
                 size: (60, 60),
                 rotation: ImageRotation::Rot90,
                 mirror: ImageMirroring::None,
-            },
+            };
         }
+
+        return ImageFormat {
+            mode: ImageMode::JPEG,
+            size: (60, 60),
+            rotation: ImageRotation::Rot0,
+            mirror: ImageMirroring::None,
+        };
     }
 }
 

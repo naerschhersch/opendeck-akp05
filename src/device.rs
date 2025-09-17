@@ -100,8 +100,7 @@ pub async fn handle_error(id: &String, err: MirajazzError) -> bool {
 pub async fn connect(candidate: &CandidateDevice) -> Result<Device, MirajazzError> {
     let result = Device::connect(
         &candidate.dev,
-        true,
-        candidate.kind.supports_both_states(),
+        candidate.kind.protocol_version(),
         KEY_COUNT,
         ENCODER_COUNT,
     )

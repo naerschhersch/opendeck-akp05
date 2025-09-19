@@ -8,19 +8,16 @@ build-linux:
     cargo build --release --target x86_64-unknown-linux-gnu --target-dir target/plugin-linux
 
 build-mac:
-    docker run --rm -it -v $(pwd):/io -w /io ghcr.io/rust-cross/cargo-zigbuild:local-1.87.0 cargo zigbuild --release --target universal2-apple-darwin --target-dir target/plugin-mac
+    docker run --rm -it -v $(pwd):/io -w /io ghcr.io/rust-cross/cargo-zigbuild:sha-eba2d7e cargo zigbuild --release --target universal2-apple-darwin --target-dir target/plugin-mac
 
 build-win:
     cargo build --release --target x86_64-pc-windows-gnu --target-dir target/plugin-win
-
-docker-macos:
-    docker build -t ghcr.io/rust-cross/cargo-zigbuild:local-1.87.0 -f Dockerfile.macos-cross .
 
 clean:
     sudo rm -rf target/
 
 collect:
-    rm -r build
+    rm -rf build
     mkdir -p build/{{id}}
     cp -r assets build/{{id}}
     cp manifest.json build/{{id}}

@@ -2,7 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.7.2] - 2025-09-29
+## [0.1.0] - 2025-10-07
+
+### 🚀 Features
+
+- Initial version for Ajazz AKP05 support (forked from AKP03 plugin)
+- USB device IDs pending - to be added when device is available
+
+## [0.7.2] - 2025-09-29 (AKP03 Version)
 
 ### 🚀 Features
 

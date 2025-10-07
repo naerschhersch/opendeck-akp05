@@ -11,6 +11,21 @@ Requires OpenDeck 2.5.0 or newer
 ## Supported devices
 
 - Ajazz AKP05 (USB-ID noch nicht bekannt - TODO)
+- Mirabox N5 (USB-ID noch nicht bekannt - TODO)
+
+## Device Layout
+
+Similar to Elgato Stream Deck+, but with more buttons:
+- **2x5 grid** of LCD buttons (10 total) - Stream Deck+ has 2x4 (8 buttons)
+- **4 rotary encoders** with push function
+- **LCD touchscreen strip** (110x14mm, divided into 4 touch zones)
+
+### Touchscreen Implementation
+
+The 4 touchscreen zones are handled as **virtual buttons** by the mirajazz library (button indices 11-14). This means:
+- OpenDeck treats them as regular buttons, allowing full customization
+- Each zone can display content and respond to touch input
+- Functionally identical to Stream Deck+ touchscreen behavior
 
 ## Platform support
 

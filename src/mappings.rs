@@ -6,10 +6,18 @@ use mirajazz::{
 // Must be unique between all the plugins, 2 characters long and match `DeviceNamespace` field in `manifest.json`
 pub const DEVICE_NAMESPACE: &str = "n5";
 
-pub const ROW_COUNT: usize = 3;
-pub const COL_COUNT: usize = 3;
-pub const KEY_COUNT: usize = 9;
-pub const ENCODER_COUNT: usize = 3;
+// Layout similar to Elgato Stream Deck+ but with 2x5 instead of 2x4 keys:
+// - 10 LCD keys (2 rows x 5 columns) - differs from Stream Deck+ which has 8 keys
+// - 4 rotary encoders with push function
+// - 4 touchscreen zones (110x14mm LCD touch strip, similar to Stream Deck+'s 800x100px)
+//
+// In OpenDeck, the layout is reported as 2x5 for the physical buttons
+// The 4 touchscreen zones are treated as virtual buttons in mirajazz (see state.rs: "Buttons include Touch Points")
+pub const ROW_COUNT: usize = 2;
+pub const COL_COUNT: usize = 5;
+pub const KEY_COUNT: usize = 10;      // Physical LCD buttons only
+pub const TOUCH_COUNT: usize = 4;     // Touchscreen zones (treated as additional buttons internally)
+pub const ENCODER_COUNT: usize = 4;
 
 #[derive(Debug, Clone)]
 pub enum Kind {

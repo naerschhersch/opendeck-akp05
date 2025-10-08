@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     DEVICES, TOKENS,
-    mappings::{COL_COUNT, CandidateDevice, ENCODER_COUNT, KEY_COUNT, Kind, ROW_COUNT},
+    mappings::{COL_COUNT, CandidateDevice, ENCODER_COUNT, KEY_COUNT, Kind, ROW_COUNT, TOUCH_ZONES},
 };
 
 /// Initializes a device and listens for events
@@ -48,7 +48,7 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
                 ROW_COUNT as u8,
                 COL_COUNT as u8,
                 ENCODER_COUNT as u8,
-                0,
+                TOUCH_ZONES as u8,
             )
             .await
             .unwrap();

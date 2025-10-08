@@ -15,5 +15,5 @@
     { "Platform": "windows", "MinimumVersion": "10" }
   ],
   "Actions": [],
-  "DeviceNamespace": "n5"
+  "DeviceNamespace": "n4"
 }

@@ -1,12 +1,13 @@
 use mirajazz::{error::MirajazzError, types::DeviceInput};
 
-use crate::mappings::{ENCODER_COUNT, KEY_COUNT, TOUCH_COUNT};
+use crate::mappings::{ENCODER_COUNT, KEY_COUNT};
 
 // TODO: These input mappings are placeholders and need to be verified with the actual AKP05 device
 // The actual input codes will need to be discovered by testing with the real hardware
 //
-// Note: The touchscreen zones are handled as additional buttons in mirajazz.
-// According to mirajazz state.rs: "Buttons include Touch Points state"
+// Note: The touchscreen zones belong to encoders, not buttons. Similar to Stream Deck+,
+// each encoder has an associated touch zone on the touchscreen strip.
+// OpenDeck handles the touchscreen rendering and swipe-to-switch-page functionality automatically.
 
 pub fn process_input(input: u8, state: u8) -> Result<DeviceInput, MirajazzError> {
     log::debug!("Processing input: 0x{:02X}, state: {}", input, state);
@@ -16,10 +17,20 @@ pub fn process_input(input: u8, state: u8) -> Result<DeviceInput, MirajazzError>
         // TODO: Update button range for 10 buttons (AKP05 has 10 vs AKP03's 9)
         (0..=10) => read_button_press(input, state),
 
-        // Touchscreen zones (treated as virtual buttons 11-14)
-        // TODO: Discover actual input codes for touchscreen zones
-        // These are placeholders that need to be verified
-        0x40..=0x43 => read_touch_press(input, state),
+        // Touchscreen tap events (4 zones, one per encoder)
+        // TODO: Discover actual input codes for touchscreen zones and verify handling mechanism
+        // These are placeholders that need to be verified with real hardware
+        //
+        // Note: Touch zones belong to encoders (similar to Stream Deck+). OpenDeck handles
+        // touchscreen rendering and swipe-to-switch-page automatically. Touch tap events might:
+        // 1. Be sent as separate touch events (if mirajazz/openaction add support), OR
+        // 2. Be handled internally by the device firmware, OR
+        // 3. Need to be discovered during hardware testing
+        0x40..=0x43 => {
+            log::warn!("Touch input code received: 0x{:02X} - handling mechanism needs verification", input);
+            // For now, return error to avoid crashes. Update after hardware testing.
+            Err(MirajazzError::BadData)
+        }
 
         // Encoder rotation (4 encoders)
         // TODO: Verify these codes with actual hardware
@@ -112,31 +123,32 @@ fn read_encoder_press(input: u8, state: u8) -> Result<DeviceInput, MirajazzError
     Ok(DeviceInput::EncoderStateChange(encoder_states))
 }
 
-fn read_touch_press(input: u8, state: u8) -> Result<DeviceInput, MirajazzError> {
-    // Touchscreen zones are treated as additional buttons (indices 11-14)
-    // This allows OpenDeck to handle them as regular button events
-    let mut button_states = vec![0x01];
-    button_states.extend(vec![0u8; KEY_COUNT + TOUCH_COUNT + 1]);
-
-    if input == 0 {
-        return Ok(DeviceInput::ButtonStateChange(read_button_states(
-            &button_states,
-        )));
-    }
-
-    // TODO: Map actual touch zone codes to button indices (11-14)
-    // The touch zones come after the physical buttons
-    let pressed_index: usize = match input {
-        0x40 => KEY_COUNT + 1, // Touch zone 1
-        0x41 => KEY_COUNT + 2, // Touch zone 2
-        0x42 => KEY_COUNT + 3, // Touch zone 3
-        0x43 => KEY_COUNT + 4, // Touch zone 4
-        _ => return Err(MirajazzError::BadData),
-    };
-
-    button_states[pressed_index] = state;
-
-    Ok(DeviceInput::ButtonStateChange(read_button_states(
-        &button_states,
-    )))
-}
+// DEPRECATED: Touch zones are now handled as part of the encoder system, not as separate buttons.
+// This function is kept for reference during hardware testing.
+// When register_device() is called with touch_zones > 0, OpenDeck handles touchscreen automatically.
+//
+// fn read_touch_press(input: u8, state: u8) -> Result<DeviceInput, MirajazzError> {
+//     // OLD IMPLEMENTATION: Treated touchscreen zones as additional buttons (indices 11-14)
+//     let mut button_states = vec![0x01];
+//     button_states.extend(vec![0u8; KEY_COUNT + TOUCH_ZONES + 1]);
+//
+//     if input == 0 {
+//         return Ok(DeviceInput::ButtonStateChange(read_button_states(
+//             &button_states,
+//         )));
+//     }
+//
+//     let pressed_index: usize = match input {
+//         0x40 => KEY_COUNT + 1, // Touch zone 1
+//         0x41 => KEY_COUNT + 2, // Touch zone 2
+//         0x42 => KEY_COUNT + 3, // Touch zone 3
+//         0x43 => KEY_COUNT + 4, // Touch zone 4
+//         _ => return Err(MirajazzError::BadData),
+//     };
+//
+//     button_states[pressed_index] = state;
+//
+//     Ok(DeviceInput::ButtonStateChange(read_button_states(
+//         &button_states,
+//     )))
+// }

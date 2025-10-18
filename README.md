@@ -10,8 +10,8 @@ Requires OpenDeck 2.5.0 or newer
 
 ## Supported devices
 
-- Ajazz AKP05 (USB-ID noch nicht bekannt - TODO)
-- Mirabox N4 (USB-ID noch nicht bekannt - TODO)
+- Ajazz AKP05 (USB-ID not yet known - hardware not available)
+- Mirabox N4 (VID: 0x6603, PID: 0x1007)
 
 ## Device Layout
 

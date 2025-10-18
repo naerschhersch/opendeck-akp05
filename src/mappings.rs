@@ -25,15 +25,17 @@ pub enum Kind {
     N4,
 }
 
-// TODO: Replace XXXX with actual VID/PID when device is available
-pub const AJAZZ_VID: u16 = 0xXXXX;
-pub const MIRABOX_VID: u16 = 0xYYYY;
+// Mirabox N4: VID and PID confirmed with actual hardware
+pub const MIRABOX_VID: u16 = 0x6603;
+pub const N4_PID: u16 = 0x1007;
 
-pub const AKP05_PID: u16 = 0xXXXX;
-pub const N4_PID: u16 = 0xYYYY;
+// Ajazz AKP05: VID/PID not yet known - hardware not available
+// Placeholder values set to 0 so build succeeds; update with real USB IDs when available
+pub const AJAZZ_VID: u16 = 0x0000;
+pub const AKP05_PID: u16 = 0x0000;
 
-// Map all queries to usage page 65440 and usage id 1 for now
-// TODO: Verify usage page and usage id for AKP05/N4
+// Usage page and usage id need verification with actual hardware testing
+// TODO: Verify usage page (65440) and usage id (1) are correct for N4 and AKP05
 pub const AKP05_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP05_PID);
 pub const N4_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, MIRABOX_VID, N4_PID);
 
@@ -71,30 +73,22 @@ impl Kind {
     }
 
     /// Returns protocol version for device
-    /// TODO: Verify correct protocol version for AKP05/N4 (likely 3 for newer devices)
     pub fn protocol_version(&self) -> usize {
         match self {
-            Self::Akp05 => 3,  // TODO: Verify this
-            Self::N4 => 3,     // TODO: Verify this
+            Self::Akp05 => 3,  // TODO: Verify this with actual AKP05 hardware
+            Self::N4 => 3,     // TODO: Verify this with N4 hardware testing
         }
     }
 
     pub fn image_format(&self) -> ImageFormat {
-        if self.protocol_version() == 3 {
-            return ImageFormat {
-                mode: ImageMode::JPEG,
-                size: (60, 60),
-                rotation: ImageRotation::Rot90,
-                mirror: ImageMirroring::None,
-            };
-        }
-
-        return ImageFormat {
+        // Static in-file configuration for key image rendering
+        // Adjust size and rotation here as needed for your device
+        ImageFormat {
             mode: ImageMode::JPEG,
-            size: (60, 60),
-            rotation: ImageRotation::Rot0,
+            size: (112, 112),
+            rotation: ImageRotation::Rot180,
             mirror: ImageMirroring::None,
-        };
+        }
     }
 }
 

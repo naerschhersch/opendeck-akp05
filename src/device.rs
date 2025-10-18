@@ -184,14 +184,18 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
             let url = DataUrl::process(image.as_str()).unwrap(); // Isn't expected to fail, so unwrap it is
             let (body, _fragment) = url.decode_to_vec().unwrap(); // Same here
 
-            // Allow only image/jpeg mime for now
-            if url.mime_type().subtype != "jpeg" {
-                log::error!("Incorrect mime type: {}", url.mime_type());
+            // Allow JPEG and PNG
+            let subtype = url.mime_type().subtype.as_str();
+            let fmt = match subtype {
+                "jpeg" | "jpg" => image::ImageFormat::Jpeg,
+                "png" => image::ImageFormat::Png,
+                other => {
+                    log::error!("Unsupported mime type: {}", other);
+                    return Ok(()); // Not fatal
+                }
+            };
 
-                return Ok(()); // Not a fatal error, enough to just log it
-            }
-
-            let image = load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg)?;
+            let image = load_from_memory_with_format(body.as_slice(), fmt)?;
 
             device
                 .set_button_image(

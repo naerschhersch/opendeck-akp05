@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 data-url = "0.3.1"
 futures-lite = "2.6.0"
-image = { version = "0.25.6", default-features = false, features = ["bmp", "jpeg"] }
+image = { version = "0.25.6", default-features = false, features = ["bmp", "jpeg", "png"] }
 log = "0.4.27"
 mirajazz = "0.9.0"
 openaction = "1.1.5"

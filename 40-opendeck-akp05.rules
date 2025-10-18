@@ -1,4 +1,7 @@
-# TODO: USB-IDs müssen noch hinzugefügt werden
-# Ajazz AKP05 (VENDOR_ID:PRODUCT_ID) - IDs noch nicht bekannt
+# Mirabox N4 (VID: 0x6603, PID: 0x1007)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="6603", ATTRS{idProduct}=="1007", MODE="0660", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="6603", ATTRS{idProduct}=="1007", MODE="0660", TAG+="uaccess"
+
+# Ajazz AKP05 (USB-ID not yet known - hardware not available)
 # SUBSYSTEM=="usb", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", MODE="0660", TAG+="uaccess"
 # KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", MODE="0660", TAG+="uaccess"

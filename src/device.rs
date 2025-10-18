@@ -39,17 +39,26 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
         }
     };
 
-    log::info!("Registering device {}", candidate.id);
+    let reg_id = candidate.id.clone();
+    let reg_name = candidate.kind.human_name();
+    let reg_rows = ROW_COUNT as u8;
+    let reg_cols = COL_COUNT as u8;
+    let reg_encoders = ENCODER_COUNT as u8;
+    let reg_touch = TOUCH_ZONES as u8;
+
+    log::info!(
+        "Registering device id={} name=\"{}\" rows={} cols={} encoders={} touch_zones={}",
+        reg_id,
+        reg_name,
+        reg_rows,
+        reg_cols,
+        reg_encoders,
+        reg_touch
+    );
+
     if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
         outbound
-            .register_device(
-                candidate.id.clone(),
-                candidate.kind.human_name(),
-                ROW_COUNT as u8,
-                COL_COUNT as u8,
-                ENCODER_COUNT as u8,
-                TOUCH_ZONES as u8,
-            )
+            .register_device(reg_id, reg_name, reg_rows, reg_cols, reg_encoders, reg_touch)
             .await
             .unwrap();
     }
@@ -178,7 +187,7 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
 pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
     match (evt.position, evt.image) {
         (Some(position), Some(image)) => {
-            log::info!("Setting image for button {}", position);
+        //  log::info!("Setting image for button {}", position);
 
             // OpenDeck sends image as a data url, so parse it using a library
             let url = DataUrl::process(image.as_str()).unwrap(); // Isn't expected to fail, so unwrap it is

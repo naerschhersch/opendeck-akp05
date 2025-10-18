@@ -46,7 +46,7 @@ impl openaction::GlobalEventHandler for GlobalEventHandler {
         event: SetImageEvent,
         _outbound: &mut OutboundEventManager,
     ) -> EventHandlerResult {
-        log::debug!("Asked to set image: {:#?}", event);
+    //  log::debug!("Asked to set image: {:#?}", event);
 
         // Skip knobs images
         if event.controller == Some("Encoder".to_string()) {
@@ -130,7 +130,7 @@ async fn sigterm() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     simplelog::TermLogger::init(
-        simplelog::LevelFilter::Info,
+        simplelog::LevelFilter::Debug,
         simplelog::Config::default(),
         simplelog::TerminalMode::Stdout,
         simplelog::ColorChoice::Never,

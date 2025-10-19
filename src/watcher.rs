@@ -13,15 +13,56 @@ use crate::{
     mappings::{CandidateDevice, DEVICE_NAMESPACE, Kind, QUERIES},
 };
 
-fn serial_to_id(serial: &String) -> String {
-    format!("{}-{}", DEVICE_NAMESPACE, serial)
+fn sanitize_identifier(raw: &str, max_len: usize) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+
+    if cleaned.is_empty() {
+        None
+    } else if cleaned.len() <= max_len {
+        Some(cleaned)
+    } else {
+        Some(cleaned[cleaned.len() - max_len..].to_string())
+    }
+}
+
+fn normalised_serial(serial: Option<&String>) -> Option<String> {
+    serial
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .and_then(|s| sanitize_identifier(s, 32))
+}
+
+fn fallback_serial(dev: &HidDeviceInfo, kind: &Kind) -> String {
+    let mut suffix = format!("{:04X}{:04X}", dev.vendor_id, dev.product_id);
+
+    if let Some(kind_tag) = sanitize_identifier(&format!("{:?}", kind), 8) {
+        suffix.push_str(&kind_tag);
+    }
+
+    if let Some(id_fragment) = sanitize_identifier(&format!("{:?}", dev.id), 16) {
+        suffix.push_str(&id_fragment);
+    }
+
+    suffix
+}
+
+fn device_id_for(dev: &HidDeviceInfo, kind: &Kind) -> String {
+    let suffix =
+        normalised_serial(dev.serial_number.as_ref()).unwrap_or_else(|| fallback_serial(dev, kind));
+
+    format!("{}-{}", DEVICE_NAMESPACE, suffix)
 }
 
 fn device_info_to_candidate(dev: HidDeviceInfo) -> Option<CandidateDevice> {
-    let id = serial_to_id(&dev.serial_number.clone()?);
     let kind = Kind::from_vid_pid(dev.vendor_id, dev.product_id)?;
+    let id = device_id_for(&dev, &kind);
 
     Some(CandidateDevice { id, dev, kind })
+}
+
+fn device_info_to_id(dev: &HidDeviceInfo) -> Option<String> {
+    let kind = Kind::from_vid_pid(dev.vendor_id, dev.product_id)?;
+    Some(device_id_for(dev, &kind))
 }
 
 /// Returns devices that matches known pid/vid pairs
@@ -97,7 +138,14 @@ pub async fn watcher_task(token: CancellationToken) -> Result<(), MirajazzError>
                     }
                 }
                 DeviceLifecycleEvent::Disconnected(info) => {
-                    let id = serial_to_id(&info.serial_number.unwrap());
+                    let Some(id) = device_info_to_id(&info) else {
+                        log::warn!(
+                            "Disconnected unknown device (VID {:04X} PID {:04X})",
+                            info.vendor_id,
+                            info.product_id
+                        );
+                        continue;
+                    };
 
                     if let Some(token) = TOKENS.write().await.remove(&id) {
                         log::info!("Sending cancel request for {}", id);

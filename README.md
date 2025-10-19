@@ -28,7 +28,7 @@ The touchscreen strip follows the **Stream Deck+ architecture**:
   - **Rendering**: Displays action information for each encoder
   - **Swipe gestures**: Swipe left/right to switch between pages
   - **Tap events**: Tap a zone to trigger the associated action
-- The plugin only needs to register the device with the correct number of touch zones
+- The plugin registers the device as a **Plus**-type device via `openaction` (device type = 1)
 - Functionally identical to Stream Deck+ touchscreen behavior
 
 ## Platform support

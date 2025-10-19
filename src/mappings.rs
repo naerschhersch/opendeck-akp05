@@ -15,9 +15,21 @@ pub const DEVICE_NAMESPACE: &str = "n4";
 // The 4 touchscreen zones belong to the encoders (one zone per encoder)
 pub const ROW_COUNT: usize = 2;
 pub const COL_COUNT: usize = 5;
-pub const KEY_COUNT: usize = 10;      // Physical LCD buttons only
+pub const KEY_COUNT: usize = 10; // Physical LCD buttons only
 pub const ENCODER_COUNT: usize = 4;
 pub const TOUCH_ZONES: usize = ENCODER_COUNT; // Each encoder has an associated touch zone
+
+// OpenDeck device type reported via `openaction` during registration.
+// Match official Stream Deck device type values so OpenDeck treats the device
+// like an Elgato Stream Deck Plus (value 7 in the Stream Deck SDK).
+#[repr(u8)]
+#[derive(Debug, Clone, Copy)]
+pub enum DeviceType {
+    /// Generic keypad-only device (Stream Deck classic)
+    StreamDeck = 0,
+    /// Stream Deck Plus with encoders and touchscreen strip
+    StreamDeckPlus = 7,
+}
 
 #[derive(Debug, Clone)]
 pub enum Kind {
@@ -39,10 +51,7 @@ pub const AKP05_PID: u16 = 0x0000;
 pub const AKP05_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, AJAZZ_VID, AKP05_PID);
 pub const N4_QUERY: DeviceQuery = DeviceQuery::new(65440, 1, MIRABOX_VID, N4_PID);
 
-pub const QUERIES: [DeviceQuery; 2] = [
-    AKP05_QUERY,
-    N4_QUERY,
-];
+pub const QUERIES: [DeviceQuery; 2] = [AKP05_QUERY, N4_QUERY];
 
 impl Kind {
     /// Matches devices VID+PID pairs to correct kinds
@@ -75,8 +84,8 @@ impl Kind {
     /// Returns protocol version for device
     pub fn protocol_version(&self) -> usize {
         match self {
-            Self::Akp05 => 3,  // TODO: Verify this with actual AKP05 hardware
-            Self::N4 => 3,     // TODO: Verify this with N4 hardware testing
+            Self::Akp05 => 3, // TODO: Verify this with actual AKP05 hardware
+            Self::N4 => 3,    // TODO: Verify this with N4 hardware testing
         }
     }
 
@@ -90,6 +99,16 @@ impl Kind {
             mirror: ImageMirroring::None,
         }
     }
+
+    /// Image format for encoder touch strip zones
+    pub fn touch_image_format(&self) -> ImageFormat {
+        ImageFormat {
+            mode: ImageMode::JPEG,
+            size: (200, 100),
+            rotation: ImageRotation::Rot180,
+            mirror: ImageMirroring::None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -97,4 +116,15 @@ pub struct CandidateDevice {
     pub id: String,
     pub dev: HidDeviceInfo,
     pub kind: Kind,
+}
+
+impl CandidateDevice {
+    // Derive OpenDeck device type from capabilities
+    pub fn device_type(&self) -> DeviceType {
+        if ENCODER_COUNT > 0 && TOUCH_ZONES > 0 {
+            DeviceType::StreamDeckPlus
+        } else {
+            DeviceType::StreamDeck
+        }
+    }
 }

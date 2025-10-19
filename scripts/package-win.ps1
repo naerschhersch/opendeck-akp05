@@ -58,8 +58,14 @@ try {
     $pluginFolder = Join-Path $buildDir $pluginFolderName
     $zipPath = Join-Path $buildDir 'opendeck-akp05.plugin.zip'
 
-    Invoke-Step -Message "Ensuring Rust toolchain '$toolchainName'" -Action { & rustup toolchain install $toolchainName | Out-Null }
-    Invoke-Step -Message "Ensuring Rust target '$target'" -Action { & rustup target add $target | Out-Null }
+    $hasRustup = (Get-Command rustup -ErrorAction SilentlyContinue) -ne $null
+    if ($hasRustup) {
+        Invoke-Step -Message "Ensuring Rust toolchain '$toolchainName'" -Action { & rustup toolchain install $toolchainName | Out-Null }
+        Invoke-Step -Message "Ensuring Rust target '$target'" -Action { & rustup target add $target | Out-Null }
+    } else {
+        Write-Warning "'rustup' not found on PATH. Skipping toolchain/target installation."
+        Write-Warning "Install rustup (winget install Rustlang.Rustup / choco install rustup.install) or ensure the requested toolchain/target is already available."
+    }
 
     if ($Toolchain -eq 'gnu') {
         # Pre-flight: basic MinGW tools check
@@ -85,7 +91,12 @@ try {
     }
 
     Invoke-Step -Message "Building Windows binary (release, $Toolchain)" -Action {
-        & cargo "+$toolchainName" build --release --target $target --target-dir $targetDir
+        if ($hasRustup) {
+            & cargo "+$toolchainName" build --release --target $target --target-dir $targetDir
+        } else {
+            # Fall back to current default cargo toolchain
+            & cargo build --release --target $target --target-dir $targetDir
+        }
     }
 
     if (-not (Test-Path $buildExe)) {

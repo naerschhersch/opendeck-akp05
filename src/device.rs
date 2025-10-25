@@ -174,11 +174,30 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
     Ok(())
 }
 
+/// Maps OpenDeck position to hardware position
+///
+/// The hardware counts positions differently than OpenDeck expects:
+/// - Hardware positions 0-3: Touch screen zones (4 zones for encoders)
+/// - Hardware positions 4-13: LCD buttons (10 buttons in 2x5 grid)
+///
+/// OpenDeck sends:
+/// - Positions 0-9: LCD buttons (2x5 grid)
+/// - Touch zones are handled separately by OpenDeck
+///
+/// Therefore we need to offset button positions by +4 to skip the touch zones
+fn map_position(opendeck_position: usize) -> usize {
+    // Offset by 4 to skip the touch screen zones
+    opendeck_position + TOUCH_ZONES
+}
+
 /// Handles different combinations of "set image" event, including clearing the specific buttons and whole device
 pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
     match (evt.position, evt.image) {
         (Some(position), Some(image)) => {
-            log::info!("Setting image for button {}", position);
+            // Map OpenDeck position to hardware position
+            let hardware_position = map_position(position);
+
+            log::info!("Setting image for OpenDeck position {} (hardware position {})", position, hardware_position);
 
             // OpenDeck sends image as a data url, so parse it using a library
             let url = DataUrl::process(image.as_str()).unwrap(); // Isn't expected to fail, so unwrap it is
@@ -199,7 +218,7 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
 
             device
                 .set_button_image(
-                    position,
+                    hardware_position,
                     Kind::from_vid_pid(device.vid, device.pid)
                         .unwrap()
                         .image_format(),
@@ -209,7 +228,9 @@ pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(),
             device.flush().await?;
         }
         (Some(position), None) => {
-            device.clear_button_image(position).await?;
+            let hardware_position = map_position(position);
+            log::info!("Clearing image for OpenDeck position {} (hardware position {})", position, hardware_position);
+            device.clear_button_image(hardware_position).await?;
             device.flush().await?;
         }
         (None, None) => {

@@ -24,6 +24,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Ensure cargo is in PATH
+$cargoPath = "$env:USERPROFILE\.cargo\bin"
+if (Test-Path $cargoPath) {
+    $env:PATH = "$cargoPath;$env:PATH"
+}
+
 function Invoke-Step {
     param(
         [Parameter(Mandatory=$true)] [string] $Message,
@@ -87,6 +93,48 @@ try {
         if (-not $haveLink) {
             Write-Warning 'MSVC build requires Visual Studio Build Tools (C++ workload) providing link.exe.'
             Write-Warning 'Install VS 2019/2022 Build Tools with: Desktop development with C++ + Windows 10/11 SDK.'
+            Write-Warning 'Attempting to locate and add Visual Studio tools to PATH...'
+
+            # Try to find and add VS tools to PATH
+            $vsPaths = @(
+                "C:\Program Files\Microsoft Visual Studio\2022\Community",
+                "C:\Program Files\Microsoft Visual Studio\2022\Professional",
+                "C:\Program Files\Microsoft Visual Studio\2022\Enterprise",
+                "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community",
+                "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional"
+            )
+
+            foreach ($vsPath in $vsPaths) {
+                if (Test-Path $vsPath) {
+                    # Find the VC tools directory
+                    $vcToolsBase = Join-Path $vsPath "VC\Tools\MSVC"
+                    if (Test-Path $vcToolsBase) {
+                        $vcVersion = Get-ChildItem $vcToolsBase | Sort-Object Name -Descending | Select-Object -First 1
+                        if ($vcVersion) {
+                            $vcToolsPath = Join-Path $vcToolsBase $vcVersion.Name
+                            $vcBinPath = Join-Path $vcToolsPath "bin\Hostx64\x64"
+
+                            # Find Windows SDK
+                            $sdkBase = "C:\Program Files (x86)\Windows Kits\10"
+                            if (Test-Path $sdkBase) {
+                                $sdkLibBase = Join-Path $sdkBase "Lib"
+                                $sdkVersion = Get-ChildItem $sdkLibBase | Where-Object { $_.Name -match '10\.0\.\d+\.\d+' } | Sort-Object Name -Descending | Select-Object -First 1
+
+                                if ($sdkVersion) {
+                                    Write-Host "Found Visual Studio at: $vsPath" -ForegroundColor Yellow
+                                    Write-Host "Using VC Tools: $vcToolsPath" -ForegroundColor Yellow
+                                    Write-Host "Using SDK: $($sdkVersion.Name)" -ForegroundColor Yellow
+
+                                    $env:PATH = "$vcBinPath;$env:PATH"
+                                    $env:LIB = "$vcToolsPath\lib\x64;$sdkBase\Lib\$($sdkVersion.Name)\um\x64;$sdkBase\Lib\$($sdkVersion.Name)\ucrt\x64"
+                                    $env:INCLUDE = "$vcToolsPath\include;$sdkBase\Include\$($sdkVersion.Name)\ucrt;$sdkBase\Include\$($sdkVersion.Name)\um;$sdkBase\Include\$($sdkVersion.Name)\shared"
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

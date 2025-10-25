@@ -4,13 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an OpenDeck plugin for Ajazz AKP05 and Mirabox N4 stream deck devices. It's written in Rust and forked from the opendeck-akp03 plugin. The plugin enables OpenDeck to communicate with these hardware devices, handling button presses, encoder rotations, touchscreen interactions, and image rendering on LCD buttons.
+This is an OpenDeck plugin for Ajazz AKP05 and Mirabox N4 stream deck devices. It's written in Rust and forked from [opendeck-akp03](https://github.com/4ndv/opendeck-akp03). The plugin enables OpenDeck to communicate with these hardware devices, handling button presses, encoder rotations, touchscreen interactions, and image rendering on LCD buttons.
 
-**Current Status**: The plugin structure is complete but USB VID/PID values and input mappings are placeholders pending actual hardware availability for testing.
+**Requires OpenDeck 2.5.0 or newer**
+
+### Supported Devices
+
+- **Mirabox N4** - VID: 0x6603, PID: 0x1007 (confirmed with hardware)
+- **Ajazz AKP05** - USB ID not yet known (hardware not available for testing)
+
+**Current Status**: The plugin structure is complete. Mirabox N4 hardware has been tested. Ajazz AKP05 USB VID/PID values and input mappings are placeholders pending actual hardware availability.
+
+### Device Layout
+
+Both devices have similar layouts to Elgato Stream Deck+:
+- **2x5 grid** of LCD buttons (10 total) - more than Stream Deck+'s 2x4 (8 buttons)
+- **4 rotary encoders** with push function
+- **LCD touchscreen strip** (110x14mm, divided into 4 touch zones, one per encoder)
+
+The devices are registered with OpenDeck as `StreamDeckPlus` type (device type 7), which enables automatic touchscreen handling for rendering, swipe gestures, and tap events.
 
 ## Build Commands
 
 ```sh
+# First-time setup: Build Docker image for macOS crosscompilation
+just prepare
+
 # Build for all platforms (requires Docker, mingw-w64-gcc, and just)
 just package
 
@@ -61,9 +80,10 @@ just release  # Runs: bump -> package -> tag
 
 **Device Configuration** (`src/mappings.rs`)
 - Device constants: 2x5 button grid (10 buttons), 4 encoders, 4 touchscreen zones
-- VID/PID definitions (currently placeholders: 0xXXXX, 0xYYYY)
+- VID/PID definitions: Mirabox N4 confirmed (0x6603, 0x1007), Ajazz AKP05 placeholders (0x0300, 0x3004)
 - `Kind` enum for device variants (Akp05, N4)
-- Image format configuration (60x60 JPEG, 90° rotation)
+- `DeviceType` enum for OpenDeck registration (StreamDeck=0, StreamDeckPlus=7)
+- Image format configuration (112x112 JPEG for buttons, 200x100 for touch zones, 180° rotation)
 
 **Plugin Entry Point** (`src/main.rs`)
 - Implements OpenDeck plugin protocol via `openaction` crate
@@ -100,21 +120,24 @@ The AKP05/N4 touchscreen follows the Stream Deck+ model:
 
 **Hardware-Dependent Values** (search codebase for `TODO`):
 
-1. **USB Identifiers** (`src/mappings.rs:29-33`):
-   - Replace `AJAZZ_VID`, `MIRABOX_VID`, `AKP05_PID`, `N4_PID` with actual values
-   - Update usage page/usage ID in device queries if needed
+1. **USB Identifiers** (`src/mappings.rs`):
+   - Ajazz AKP05: Replace placeholder VID (0x0300) and PID (0x3004) with actual values when hardware is available
+   - Mirabox N4: VID (0x6603) and PID (0x1007) confirmed with hardware
+   - Verify usage page (65440) and usage ID (1) are correct for both devices
 
 2. **Input Mappings** (`src/inputs.rs`):
-   - Line 18: Button input codes (0..=10 range)
-   - Line 29-33: Touchscreen tap codes (0x40..=0x43 placeholders)
-   - Line 37: Encoder rotation codes (0x90/0x91, 0x50/0x51, 0x60/0x61, 0x70/0x71)
-   - Line 41: Encoder press codes (0x33, 0x35, 0x34, 0x36)
+   - Button input codes (currently 0..=10 range) - verify with hardware
+   - Touchscreen tap codes (0x40..=0x43) - verify with hardware
+   - Encoder rotation codes: E1(0xA0/0xA1), E2(0x50/0x51), E3(0x90/0x91), E4(0x70/0x71)
+   - Encoder press codes: E1(0x37), E2(0x35), E3(0x33), E4(0x36)
 
-3. **Protocol Version** (`src/mappings.rs:75-79`):
-   - Verify devices use protocol version 3
+3. **Protocol Version** (`src/mappings.rs`):
+   - Both devices set to protocol version 3 - verify with hardware testing
 
-4. **Image Format** (`src/mappings.rs:82-98`):
-   - Confirm 60x60 size, 90° rotation, JPEG format
+4. **Image Format** (`src/mappings.rs`):
+   - Buttons: 112x112 JPEG, 180° rotation
+   - Touch zones: 200x100 JPEG, 180° rotation
+   - Verify these settings with actual hardware
 
 ## Device Differences from AKP03
 
@@ -124,8 +147,26 @@ The AKP05/N4 touchscreen follows the Stream Deck+ model:
 
 ## Development Notes
 
-- Linux is the primary development platform
-- Windows/Mac have minimal support but cross-compilation is configured
-- Log level is set to `Info` in production; use `Debug` for troubleshooting input mappings
+- **Linux** is the primary development platform (cross-compilation configured for Windows/macOS)
+- **Windows** is the primary target platform for OpenDeck users
+- Log level currently set to `Debug` in `src/main.rs:125` - consider changing to `Info` for release
 - Device namespace "n4" is shared between Ajazz AKP05 and Mirabox N4 variants
 - The plugin compiles to platform-specific binaries referenced in `manifest.json`
+- Windows signal handling needs improvement (see TODO at `src/main.rs:116`)
+
+### Prerequisites
+
+- Rust 1.87+ with targets: `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-gnu`
+- [just](https://just.systems) command runner
+- mingw-w64-gcc for Windows cross-compilation
+- Docker (for macOS builds only)
+
+### Debugging Input Mappings
+
+When testing with real hardware to determine input codes:
+
+1. Log level is set to `Debug` in `src/main.rs:125` which outputs all raw input events
+2. Unknown inputs are logged with `EVENT Unknown code=0x{:02X} state={}`
+3. Known inputs are logged as `EVENT Button/EncoderTwist/EncoderPress/TouchTap/TouchSwipe`
+4. Update the pattern matching in `src/inputs.rs::process_input()` based on observed codes
+5. Verify mappings match the physical layout (button grid is row-major order)

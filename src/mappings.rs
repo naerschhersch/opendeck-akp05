@@ -6,30 +6,30 @@ use mirajazz::{
 // Must be unique between all the plugins, 2 characters long and match `DeviceNamespace` field in `manifest.json`
 pub const DEVICE_NAMESPACE: &str = "n4";
 
-// Layout similar to Elgato Stream Deck+ but with 2x5 instead of 2x4 keys:
-// - 10 LCD keys (2 rows x 5 columns) - differs from Stream Deck+ which has 8 keys
+// Mirabox N4 layout (verified with hardware):
+// - 10 regular LCD buttons: 2 rows x 5 columns
+// - 4 wide LCD buttons for encoder touch zones
 // - 4 rotary encoders with push function
-// - 4 touchscreen zones (110x14mm LCD touch strip, similar to Stream Deck+'s 800x100px)
+// - Layout in OpenDeck: 2 rows x 5 columns + 4 encoders with touch zones
 //
-// In OpenDeck, the layout is reported as 2x5 for the physical buttons
-// The 4 touchscreen zones belong to the encoders (one zone per encoder)
+// Hardware button indices:
+// [0] [1] [2] [3]              <- 4 wide touch zone buttons (one per encoder)
+// Unused: indices 4
+// [5] [6] [7] [8] [9]          <- Bottom row (5 regular buttons)
+// [10] [11] [12] [13] [14]     <- Top row (5 regular buttons)
+//
+// OpenDeck mapping:
+// Encoder 0-3 → Touch buttons 0-3
+// Grid 0-4 (top row) → Hardware buttons 10-14
+// Grid 5-9 (bottom row) → Hardware buttons 5-9
 pub const ROW_COUNT: usize = 2;
 pub const COL_COUNT: usize = 5;
-pub const KEY_COUNT: usize = 10; // Physical LCD buttons only
+pub const KEY_COUNT: usize = 15; // Hardware uses indices 0-14 (4 touch buttons + 10 regular buttons)
 pub const ENCODER_COUNT: usize = 4;
-pub const TOUCH_ZONES: usize = ENCODER_COUNT; // Each encoder has an associated touch zone
 
-// OpenDeck device type reported via `openaction` during registration.
-// Match official Stream Deck device type values so OpenDeck treats the device
-// like an Elgato Stream Deck Plus (value 7 in the Stream Deck SDK).
-#[repr(u8)]
-#[derive(Debug, Clone, Copy)]
-pub enum DeviceType {
-    /// Generic keypad-only device (Stream Deck classic)
-    StreamDeck = 0,
-    /// Stream Deck Plus with encoders and touchscreen strip
-    StreamDeckPlus = 7,
-}
+// OpenDeck device type: 7 = StreamDeckPlus (with encoders and touch zones)
+// This enables automatic encoder function rendering on the 4 wide touch zone buttons
+pub const DEVICE_TYPE: u8 = 7;
 
 #[derive(Debug, Clone)]
 pub enum Kind {
@@ -43,8 +43,8 @@ pub const N4_PID: u16 = 0x1007;
 
 // Ajazz AKP05: VID/PID not yet known - hardware not available
 // Placeholder values set to 0 so build succeeds; update with real USB IDs when available
-pub const AJAZZ_VID: u16 = 0x0000;
-pub const AKP05_PID: u16 = 0x0000;
+pub const AJAZZ_VID: u16 = 0x0300;
+pub const AKP05_PID: u16 = 0x3004;
 
 // Usage page and usage id need verification with actual hardware testing
 // TODO: Verify usage page (65440) and usage id (1) are correct for N4 and AKP05
@@ -89,9 +89,8 @@ impl Kind {
         }
     }
 
+    /// Image format for regular LCD buttons (2x5 grid, positions 0-9)
     pub fn image_format(&self) -> ImageFormat {
-        // Static in-file configuration for key image rendering
-        // Adjust size and rotation here as needed for your device
         ImageFormat {
             mode: ImageMode::JPEG,
             size: (112, 112),
@@ -100,11 +99,13 @@ impl Kind {
         }
     }
 
-    /// Image format for encoder touch strip zones
-    pub fn touch_image_format(&self) -> ImageFormat {
+    /// Image format for wide touch zone buttons (4 buttons, hardware indices 0-3)
+    /// These are discrete LCD buttons used to display encoder functions
+    /// Testing wider dimension to reach the top
+    pub fn image_format_touchzone(&self) -> ImageFormat {
         ImageFormat {
             mode: ImageMode::JPEG,
-            size: (200, 100),
+            size: (184, 120),
             rotation: ImageRotation::Rot180,
             mirror: ImageMirroring::None,
         }
@@ -116,15 +117,4 @@ pub struct CandidateDevice {
     pub id: String,
     pub dev: HidDeviceInfo,
     pub kind: Kind,
-}
-
-impl CandidateDevice {
-    // Derive OpenDeck device type from capabilities
-    pub fn device_type(&self) -> DeviceType {
-        if ENCODER_COUNT > 0 && TOUCH_ZONES > 0 {
-            DeviceType::StreamDeckPlus
-        } else {
-            DeviceType::StreamDeck
-        }
-    }
 }

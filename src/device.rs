@@ -1,5 +1,5 @@
 use data_url::DataUrl;
-use image::{DynamicImage, GenericImageView, load_from_memory_with_format};
+use image::load_from_memory_with_format;
 use mirajazz::{device::Device, error::MirajazzError, state::DeviceStateUpdate};
 use openaction::{OUTBOUND_EVENT_MANAGER, SetImageEvent};
 use tokio_util::sync::CancellationToken;
@@ -7,13 +7,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     DEVICES, TOKENS,
     mappings::{
-        COL_COUNT, CandidateDevice, ENCODER_COUNT, KEY_COUNT, Kind, ROW_COUNT, TOUCH_ZONES,
+        COL_COUNT, CandidateDevice, DEVICE_TYPE, ENCODER_COUNT, KEY_COUNT, Kind, ROW_COUNT,
     },
 };
-
-// Hardware index mapping: adjust if testing reveals a different device order.
-const TOUCH_INDEX_MAP: [u8; ENCODER_COUNT] = [0, 1, 2, 3];
-const BUTTON_INDEX_MAP: [u8; KEY_COUNT] = [8, 7, 6, 5, 4, 9, 10, 11, 12, 13];
 
 /// Initializes a device and listens for events
 pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
@@ -45,32 +41,16 @@ pub async fn device_task(candidate: CandidateDevice, token: CancellationToken) {
         }
     };
 
-    let reg_id = candidate.id.clone();
-    let reg_name = candidate.kind.human_name();
-    let reg_rows = ROW_COUNT as u8;
-    let reg_cols = COL_COUNT as u8;
-    let reg_encoders = ENCODER_COUNT as u8;
-    let reg_touch = TOUCH_ZONES as u8;
-
-    log::info!(
-        "Registering device id={} name=\"{}\" rows={} cols={} encoders={} touch_zones={}",
-        reg_id,
-        reg_name,
-        reg_rows,
-        reg_cols,
-        reg_encoders,
-        reg_touch
-    );
-
+    log::info!("Registering device {}", candidate.id);
     if let Some(outbound) = OUTBOUND_EVENT_MANAGER.lock().await.as_mut() {
         outbound
             .register_device(
-                reg_id,
-                reg_name,
-                reg_rows,
-                reg_cols,
-                reg_encoders,
-                reg_touch,
+                candidate.id.clone(),
+                candidate.kind.human_name(),
+                ROW_COUNT as u8,
+                COL_COUNT as u8,
+                ENCODER_COUNT as u8,
+                DEVICE_TYPE,
             )
             .await
             .unwrap();
@@ -196,203 +176,108 @@ async fn device_events_task(candidate: &CandidateDevice) -> Result<(), MirajazzE
     Ok(())
 }
 
-/// Handles different combinations of "set image" event, including clearing the specific buttons and whole device
+/// Handles image setting for buttons and encoder touch zones
 pub async fn handle_set_image(device: &Device, evt: SetImageEvent) -> Result<(), MirajazzError> {
-    let kind = match Kind::from_vid_pid(device.vid, device.pid) {
-        Some(kind) => kind,
-        None => {
-            log::warn!(
-                "Unable to determine device kind for image update (VID {:04X}, PID {:04X})",
-                device.vid,
-                device.pid
-            );
-            return Ok(());
-        }
-    };
+    // Check if this is an encoder touch zone or a regular button
+    let is_encoder = evt.controller.as_deref() == Some("Encoder");
 
-    let mut target_is_touch = matches!(evt.controller.as_deref(), Some("Encoder"));
+    if is_encoder {
+        // Handle encoder touch zone rendering
+        // Hardware has 4 discrete wide LCD buttons (indices 0-3), not a programmable strip
+        // Map encoder positions directly to these wide buttons
+        match (evt.position, evt.image) {
+            (Some(encoder_index), Some(image)) => {
+                log::info!("Setting touch zone image for encoder {} (button index {})", encoder_index, encoder_index);
 
-    if let Some(pos) = evt.position {
-        if (pos as usize) < ENCODER_COUNT {
-            target_is_touch = true;
-        }
-    }
+                // OpenDeck sends image as a data URL
+                let url = DataUrl::process(image.as_str()).unwrap();
+                let (body, _fragment) = url.decode_to_vec().unwrap();
 
-    let image = if let Some(data) = evt.image.as_ref() {
-        let (body, fmt) = decode_image_data(data)?;
-        Some(load_from_memory_with_format(body.as_slice(), fmt)?)
-    } else {
-        None
-    };
-
-    if target_is_touch {
-        handle_touch_strip_image(device, kind, evt.position, image).await?;
-    } else {
-        handle_button_images(device, kind, evt.position, image).await?;
-    }
-
-    Ok(())
-}
-
-async fn handle_button_images(
-    device: &Device,
-    kind: Kind,
-    position: Option<u8>,
-    image: Option<DynamicImage>,
-) -> Result<(), MirajazzError> {
-    match (position, image) {
-        (Some(pos), Some(image)) => {
-            if let Some(&index) = BUTTON_INDEX_MAP.get(pos as usize) {
-                device
-                    .set_button_image(index, kind.image_format(), image)
-                    .await?;
-                device.flush().await?;
-            } else {
-                log::warn!(
-                    "Ignoring button image for out-of-range logical position {}",
-                    pos
-                );
-            }
-        }
-        (Some(pos), None) => {
-            if let Some(&index) = BUTTON_INDEX_MAP.get(pos as usize) {
-                device.clear_button_image(index).await?;
-                device.flush().await?;
-            } else {
-                log::warn!(
-                    "Ignoring button clear for out-of-range logical position {}",
-                    pos
-                );
-            }
-        }
-        (None, None) => {
-            for &index in BUTTON_INDEX_MAP.iter() {
-                device.clear_button_image(index).await?;
-            }
-            device.flush().await?;
-        }
-        (None, Some(image)) => {
-            for &index in BUTTON_INDEX_MAP.iter() {
-                device
-                    .set_button_image(index, kind.image_format(), image.clone())
-                    .await?;
-            }
-            device.flush().await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_touch_strip_image(
-    device: &Device,
-    kind: Kind,
-    position: Option<u8>,
-    image: Option<DynamicImage>,
-) -> Result<(), MirajazzError> {
-    let touch_format = kind.touch_image_format();
-
-    match (position, image) {
-        (Some(pos), Some(image)) => {
-            if let Some(&index) = TOUCH_INDEX_MAP.get(pos as usize) {
-                device.set_button_image(index, touch_format, image).await?;
-                device.flush().await?;
-            } else {
-                log::warn!(
-                    "Ignoring touch image update for out-of-range position {}",
-                    pos
-                );
-            }
-        }
-        (Some(pos), None) => {
-            if let Some(&index) = TOUCH_INDEX_MAP.get(pos as usize) {
-                device.clear_button_image(index).await?;
-                device.flush().await?;
-            } else {
-                log::warn!(
-                    "Ignoring touch clear request for out-of-range position {}",
-                    pos
-                );
-            }
-        }
-        (None, None) => {
-            for &index in TOUCH_INDEX_MAP.iter() {
-                device.clear_button_image(index).await?;
-            }
-            device.flush().await?;
-        }
-        (None, Some(full_image)) => {
-            let width = full_image.width();
-            let height = full_image.height();
-
-            if width == 0 || height == 0 {
-                log::warn!("Received empty encoder strip image ({}x{})", width, height);
-                return Ok(());
-            }
-
-            let zones = TOUCH_INDEX_MAP.len();
-            if zones == 0 {
-                return Ok(());
-            }
-
-            let chunk_width = (width / zones as u32).max(1);
-
-            for (zone, &index) in TOUCH_INDEX_MAP.iter().enumerate() {
-                let x = chunk_width * zone as u32;
-                if x >= width {
-                    break;
+                // Allow only image/jpeg mime type
+                if url.mime_type().subtype != "jpeg" {
+                    log::error!("Incorrect mime type: {}", url.mime_type());
+                    return Ok(()); // Not fatal, just log it
                 }
 
-                let remaining = width.saturating_sub(x);
-                let segment_width = if zone == zones - 1 {
-                    remaining
-                } else {
-                    chunk_width.min(remaining)
-                };
+                let image_loaded = load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg)?;
 
-                if segment_width == 0 {
-                    continue;
+                // Hardware uses button index positioning (discrete LCD buttons, not programmable strip)
+                // Tested: write_lcd() is accepted but silently ignored - hardware doesn't support pixel positioning
+                let image_format = Kind::from_vid_pid(device.vid, device.pid)
+                    .unwrap()
+                    .image_format_touchzone();
+
+                device.set_button_image(encoder_index, image_format, image_loaded).await?;
+                device.flush().await?;
+            }
+            (Some(encoder_index), None) => {
+                log::info!("Clearing touch zone for encoder {} (button index {})", encoder_index, encoder_index);
+
+                // Clear the wide button at this encoder index
+                device.clear_button_image(encoder_index).await?;
+                device.flush().await?;
+            }
+            (None, None) => {
+                log::info!("Clearing all touch zones (buttons 0-3)");
+
+                // Clear the 4 wide touch zone buttons (indices 0-3)
+                for i in 0..4 {
+                    device.clear_button_image(i).await?;
+                }
+                device.flush().await?;
+            }
+            _ => {}
+        }
+    } else {
+        // Handle regular button rendering (2x5 grid, positions 0-9)
+        // Position correction needed: hardware rows are reversed from OpenDeck layout
+        // OpenDeck layout:    Hardware layout:
+        // [0] [1] [2] [3] [4]   [10] [11] [12] [13] [14]  <- Top row
+        // [5] [6] [7] [8] [9]   [5]  [6]  [7]  [8]  [9]  <- Bottom row
+
+        let corrected_pos = evt.position.map(|pos| {
+            match pos {
+                0..=4 => pos + 10,  // Top row: OpenDeck 0-4 → Hardware 10-14
+                5..=9 => pos,       // Bottom row: OpenDeck 5-9 → Hardware 5-9
+                _ => pos,           // Invalid, pass through
+            }
+        });
+
+        match (corrected_pos, evt.image) {
+            (Some(position), Some(image)) => {
+                log::info!("Setting image for button {} (OpenDeck pos: {:?})", position, evt.position);
+
+                // OpenDeck sends image as a data URL
+                let url = DataUrl::process(image.as_str()).unwrap();
+                let (body, _fragment) = url.decode_to_vec().unwrap();
+
+                // Allow only image/jpeg mime type
+                if url.mime_type().subtype != "jpeg" {
+                    log::error!("Incorrect mime type: {}", url.mime_type());
+                    return Ok(()); // Not fatal, just log it
                 }
 
-                let segment = full_image.crop_imm(x, 0, segment_width, height);
+                let image = load_from_memory_with_format(body.as_slice(), image::ImageFormat::Jpeg)?;
 
-                device
-                    .set_button_image(index, touch_format, segment)
-                    .await?;
+                let image_format = Kind::from_vid_pid(device.vid, device.pid)
+                    .unwrap()
+                    .image_format();
+
+                device.set_button_image(position, image_format, image).await?;
+                device.flush().await?;
             }
-
-            device.flush().await?;
+            (Some(position), None) => {
+                device.clear_button_image(position).await?;
+                device.flush().await?;
+            }
+            (None, None) => {
+                // Clear all buttons (includes touch zone buttons 0-3 and regular buttons 5-14)
+                device.clear_all_button_images().await?;
+                device.flush().await?;
+            }
+            _ => {}
         }
     }
 
     Ok(())
-}
-
-fn decode_image_data(data: &str) -> Result<(Vec<u8>, image::ImageFormat), MirajazzError> {
-    let url = match DataUrl::process(data) {
-        Ok(url) => url,
-        Err(err) => {
-            log::error!("Failed to parse image data URL: {}", err);
-            return Err(MirajazzError::BadData);
-        }
-    };
-
-    let (body, _fragment) = match url.decode_to_vec() {
-        Ok(decoded) => decoded,
-        Err(err) => {
-            log::error!("Failed to decode image payload: {}", err);
-            return Err(MirajazzError::BadData);
-        }
-    };
-
-    let format = match url.mime_type().subtype.as_str() {
-        "jpeg" | "jpg" => image::ImageFormat::Jpeg,
-        "png" => image::ImageFormat::Png,
-        other => {
-            log::error!("Unsupported image mime type: {}", other);
-            return Err(MirajazzError::BadData);
-        }
-    };
-
-    Ok((body, format))
 }
